@@ -1,0 +1,19 @@
+# Build output
+/build/
+*.o
+*.a
+*.elf
+*.dol
+*.iso
+*.gcm
+
+# Dependency files
+*.d
+
+# Editor / OS noise
+*~
+.DS_Store
+
+# Python host tooling
+__pycache__/
+*.py[cod]
