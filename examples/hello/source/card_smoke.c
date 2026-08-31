@@ -119,8 +119,8 @@ bool HelloCardSmokeTest(void)
      * via ch_card_build.py's generated header.
      */
     result =
-        CARD_Open(
-            CARD_SLOTA,
+        CH_MemCardOpen(
+            &session,
             CH_CARD_PRESENTATION_FILENAME,
             &file
         );
@@ -132,8 +132,8 @@ bool HelloCardSmokeTest(void)
          * returns the opened card_file directly.
          */
         result =
-            CARD_Create(
-                CARD_SLOTA,
+            CH_MemCardCreate(
+                &session,
                 CH_CARD_PRESENTATION_FILENAME,
                 (u32)sectorSize,
                 &file
