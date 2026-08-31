@@ -11,5 +11,6 @@
 #include <carryhandle/ch_version.h>
 #include <carryhandle/ch_application.h>
 #include <carryhandle/ch_card_presentation.h>
+#include <carryhandle/ch_memcard.h>
 
 #endif
