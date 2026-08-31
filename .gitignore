@@ -1,5 +1,5 @@
 # Build output
-/build/
+build/
 *.o
 *.a
 *.elf
