@@ -33,12 +33,26 @@ static void initialise_console(void)
 
 int main(void)
 {
+    const CH_ApplicationInfo *app;
+
     initialise_console();
+
+    app = CH_ApplicationGetInfo();
 
     printf("\x1b[2;0H");
 
     printf("CarryHandle %s\n", CH_VersionString());
     printf("=====================\n\n");
+
+    printf("Application : %s\n", app->name);
+    printf("Game code   : %s\n", app->game_code);
+    printf("Company     : %s\n", app->company_code);
+    printf(
+        "Region      : %s (%d)\n",
+        CH_ApplicationRegionName(app->region),
+        (int)app->region
+    );
+    printf("Store ID    : %s\n\n", app->store_id);
 
     printf("Hello from Nintendo GameCube.\n\n");
 

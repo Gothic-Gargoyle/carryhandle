@@ -9,5 +9,6 @@
  */
 
 #include <carryhandle/ch_version.h>
+#include <carryhandle/ch_application.h>
 
 #endif

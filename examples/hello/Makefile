@@ -20,6 +20,11 @@ include $(DEVKITPRO)/libogc2/gamecube_rules
 TARGET   := hello
 BUILD    := build
 
+MANIFEST             := $(PROJECT_DIR)/carryhandle.cfg
+MANIFEST_TOOL        := $(CARRY_ROOT)/tools/ch_manifest.py
+GENERATED_APP_HEADER := $(PROJECT_DIR)/$(BUILD)/ch_application_config.h
+
+
 SOURCES  := $(PROJECT_DIR)/source \
             $(CARRY_ROOT)/source
 
@@ -67,11 +72,17 @@ export LIBPATHS := \
 
 .PHONY: $(BUILD) clean
 
-$(BUILD):
+$(BUILD): $(GENERATED_APP_HEADER)
 	@mkdir -p $(PROJECT_DIR)/$(BUILD)
 	@$(MAKE) --no-print-directory \
 		-C $(PROJECT_DIR)/$(BUILD) \
 		-f $(PROJECT_DIR)/Makefile
+
+$(GENERATED_APP_HEADER): $(MANIFEST) $(MANIFEST_TOOL)
+	@mkdir -p $(PROJECT_DIR)/$(BUILD)
+	@PYTHONDONTWRITEBYTECODE=1 python3 $(MANIFEST_TOOL) \
+		$(MANIFEST) \
+		--output-header $(GENERATED_APP_HEADER)
 
 clean:
 	@echo clean ...
@@ -85,7 +96,7 @@ else
 DEPENDS := $(OFILES:.o=.d)
 
 $(OUTPUT).dol: $(OUTPUT).elf
-$(OUTPUT).elf: $(OFILES)
+$(OUTPUT).elf: $(GENERATED_APP_HEADER) $(OFILES)
 
 -include $(DEPENDS)
 
