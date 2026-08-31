@@ -4,6 +4,8 @@
 
 #include <carryhandle/carryhandle.h>
 
+#include "card_smoke.h"
+
 static void *xfb;
 static GXRModeObj *rmode;
 
@@ -53,6 +55,17 @@ int main(void)
         (int)app->region
     );
     printf("Store ID    : %s\n\n", app->store_id);
+
+    printf("Memory Card presentation:\n");
+
+    if (HelloCardSmokeTest())
+    {
+        printf("CARD smoke    : PASS\n\n");
+    }
+    else
+    {
+        printf("CARD smoke    : FAIL\n\n");
+    }
 
     printf("Hello from Nintendo GameCube.\n\n");
 
