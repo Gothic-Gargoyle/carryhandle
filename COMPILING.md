@@ -2,8 +2,8 @@
 
 CarryHandle targets the Nintendo GameCube using devkitPPC and libogc2.
 
-This document defines the intended build workflow. The build system will
-be introduced alongside the first executable CarryHandle example.
+The initial build workflow follows the installed libogc2 GameCube
+templates and uses `$(DEVKITPRO)/libogc2/gamecube_rules`.
 
 ## Requirements
 
@@ -55,34 +55,36 @@ or adding it as a Git submodule.
 A global `make install` workflow is not required for the initial
 versions.
 
-## Intended CarryHandle build
+## Building CarryHandle examples
 
-The root build interface will use ordinary Make targets.
+The root build interface uses ordinary Make targets.
 
-The intended interface is:
+Build all currently available examples with:
 
 ```sh
 make
 ```
 
-to build CarryHandle and:
+or explicitly:
 
 ```sh
 make examples
 ```
 
-to build the bundled examples.
+Build only the hello example with:
 
-Individual examples should also be buildable independently.
+```sh
+make hello
+```
 
-For example:
+The example can also be built directly:
 
 ```sh
 make -C examples/hello
 ```
 
-Exact targets will be documented once the first executable example is
-implemented.
+The first example compiles the CarryHandle source it needs directly from
+the repository. A standalone installed library is not required.
 
 ## Build output
 
@@ -168,10 +170,16 @@ Dependencies such as SDL should be module-specific and optional.
 An application that only needs low-level CarryHandle facilities should
 not be forced to link SDL.
 
-## Current bootstrap state
+## Current development state
 
-The repository currently contains the project architecture and initial
-version API.
+CarryHandle currently provides:
 
-The next implementation milestone is the first GameCube executable and
-the concrete Makefile infrastructure supporting it.
+- the initial public version API
+- root Make orchestration
+- a GameCube hello example
+- a build based on the installed libogc2 GameCube rules
+
+The hello example is intentionally minimal and uses libogc2 directly for
+video-console setup and controller polling. Those facilities will only
+move behind CarryHandle APIs when reusable module boundaries have been
+established.
