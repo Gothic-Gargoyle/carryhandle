@@ -115,3 +115,86 @@ bool CH_MemCardUnmount(
 
     return true;
 }
+
+static bool CH_MemCardFilenameValid(
+    const char *filename
+)
+{
+    size_t length;
+
+    if (!filename)
+    {
+        return false;
+    }
+
+    length = strlen(filename);
+
+    return (
+        length > 0u
+        && length <= CARD_FILENAMELEN
+    );
+}
+
+
+s32 CH_MemCardOpen(
+    const CH_MemCardSession *session,
+    const char *filename,
+    card_file *file
+)
+{
+    if (
+        !session
+        || !file
+        || !CH_MemCardFilenameValid(filename)
+    )
+    {
+        return CH_MEMCARD_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (!session->mounted)
+    {
+        return CH_MEMCARD_ERROR_NOT_MOUNTED;
+    }
+
+    return CARD_Open(
+        session->slot,
+        filename,
+        file
+    );
+}
+
+
+s32 CH_MemCardCreate(
+    const CH_MemCardSession *session,
+    const char *filename,
+    u32 size,
+    card_file *file
+)
+{
+    if (
+        !session
+        || !file
+        || !CH_MemCardFilenameValid(filename)
+        || session->sector_size <= 0
+        || size == 0u
+        || (
+            size
+            % (u32)session->sector_size
+        ) != 0u
+    )
+    {
+        return CH_MEMCARD_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (!session->mounted)
+    {
+        return CH_MEMCARD_ERROR_NOT_MOUNTED;
+    }
+
+    return CARD_Create(
+        session->slot,
+        filename,
+        size,
+        file
+    );
+}

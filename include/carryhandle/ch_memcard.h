@@ -39,6 +39,42 @@ bool CH_MemCardMount(
 
 
 /*
+ * CarryHandle-specific errors occupy a range outside libogc2 CARD
+ * error codes. Otherwise CH_MemCardOpen/Create return CARD_* results
+ * unchanged.
+ */
+#define CH_MEMCARD_ERROR_INVALID_ARGUMENT ((s32)-1000)
+#define CH_MEMCARD_ERROR_NOT_MOUNTED      ((s32)-1001)
+
+
+/*
+ * Open an existing file on a mounted Memory Card.
+ *
+ * Returns CARD_ERROR_READY on success, CARD_ERROR_NOFILE when the
+ * file does not exist, another CARD_* error from libogc2, or one of
+ * the CH_MEMCARD_ERROR_* values above.
+ */
+s32 CH_MemCardOpen(
+    const CH_MemCardSession *session,
+    const char *filename,
+    card_file *file
+);
+
+
+/*
+ * Create a new file and return it opened for immediate use.
+ *
+ * size must be a non-zero multiple of session->sector_size.
+ */
+s32 CH_MemCardCreate(
+    const CH_MemCardSession *session,
+    const char *filename,
+    u32 size,
+    card_file *file
+);
+
+
+/*
  * Unmount a session previously opened by CH_MemCardMount().
  *
  * Safe to call on an already-unmounted session.
