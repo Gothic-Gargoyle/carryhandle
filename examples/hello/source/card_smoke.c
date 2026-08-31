@@ -25,21 +25,11 @@ static unsigned char cardWorkArea[CARD_WORKAREA]
     __attribute__((aligned(32)));
 
 
-static void cardRemoved(
-    s32 channel,
-    s32 result
-)
-{
-    (void)result;
-
-    CARD_Unmount(channel);
-}
-
-
 bool HelloCardSmokeTest(void)
 {
     const CH_ApplicationInfo *app;
 
+    CH_MemCardSession session;
     card_file file;
     card_stat status;
 
@@ -63,46 +53,27 @@ bool HelloCardSmokeTest(void)
      * Application identity comes from carryhandle.cfg through the
      * generated CH_ApplicationInfo descriptor.
      */
-    result =
-        CARD_Init(
-            app->game_code,
-            app->company_code
-        );
+    memset(
+        &session,
+        0,
+        sizeof(session)
+    );
 
-    if (result < CARD_ERROR_READY)
+    if (!CH_MemCardMount(
+        &session,
+        CARD_SLOTA,
+        app->game_code,
+        app->company_code,
+        cardWorkArea
+    ))
     {
-        printf(
-            "CARD init    : FAIL (%ld)\n",
-            (long)result
-        );
-
+        printf("CARD A mount : FAIL\n");
         return false;
     }
 
-    /*
-     * Follow the installed libogc2 example: ProbeEx may briefly report
-     * BUSY while the card is being detected.
-     */
-    do
-    {
-        result =
-            CARD_ProbeEx(
-                CARD_SLOTA,
-                &memorySize,
-                &sectorSize
-            );
-    }
-    while (result == CARD_ERROR_BUSY);
-
-    if (result < CARD_ERROR_READY)
-    {
-        printf(
-            "CARD A probe : FAIL (%ld)\n",
-            (long)result
-        );
-
-        return false;
-    }
+    mounted = true;
+    memorySize = session.memory_size;
+    sectorSize = session.sector_size;
 
     printf(
         "CARD A        : %ld Mbit / %ld byte sector\n",
@@ -117,35 +88,10 @@ bool HelloCardSmokeTest(void)
                 + CH_CARD_PRESENTATION_DATA_SIZE
     )
     {
-        printf(
-            "CARD sector  : too small\n"
-        );
-
+        printf("CARD sector  : too small\n");
+        CH_MemCardUnmount(&session);
         return false;
     }
-
-    result =
-        CARD_Mount(
-            CARD_SLOTA,
-            cardWorkArea,
-            cardRemoved
-        );
-
-    /*
-     * CARD_ERROR_UNLOCKED is positive, so the installed example treats
-     * any non-negative mount result as success.
-     */
-    if (result < CARD_ERROR_READY)
-    {
-        printf(
-            "CARD A mount : FAIL (%ld)\n",
-            (long)result
-        );
-
-        return false;
-    }
-
-    mounted = true;
 
     sectorBuffer =
         memalign(
@@ -311,9 +257,9 @@ cleanup:
     if (mounted)
     {
         unmountResult =
-            CARD_Unmount(
-                CARD_SLOTA
-            );
+            CH_MemCardUnmount(&session)
+                ? CARD_ERROR_READY
+                : CARD_ERROR_FATAL_ERROR;
 
         mounted = false;
     }
