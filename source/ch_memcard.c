@@ -198,3 +198,15 @@ s32 CH_MemCardCreate(
         file
     );
 }
+
+s32 CH_MemCardClose(
+    card_file *file
+)
+{
+    if (!file)
+    {
+        return CH_MEMCARD_ERROR_INVALID_ARGUMENT;
+    }
+
+    return CARD_Close(file);
+}

@@ -75,6 +75,16 @@ s32 CH_MemCardCreate(
 
 
 /*
+ * Close an opened Memory Card file.
+ *
+ * Returns CARD_ERROR_READY on success or the underlying CARD_* error.
+ */
+s32 CH_MemCardClose(
+    card_file *file
+);
+
+
+/*
  * Unmount a session previously opened by CH_MemCardMount().
  *
  * Safe to call on an already-unmounted session.
