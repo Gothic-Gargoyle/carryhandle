@@ -31,7 +31,21 @@ from ch_card_assets import (
 )
 
 
-def emit_header():
+def c_string(value):
+    return (
+        '"'
+        + value
+            .replace("\\\\", "\\\\\\\\")
+            .replace('"', '\\\\"')
+        + '"'
+    )
+
+
+def emit_header(card):
+    filename = c_string(
+        card["filename"]
+    )
+
     return f"""\
 /*
  * GENERATED FILE.
@@ -42,6 +56,9 @@ def emit_header():
 
 #ifndef CARRYHANDLE_GENERATED_CH_CARD_PRESENTATION_DATA_H
 #define CARRYHANDLE_GENERATED_CH_CARD_PRESENTATION_DATA_H
+
+#define CH_CARD_PRESENTATION_FILENAME \\
+    {filename}
 
 #define CH_CARD_PRESENTATION_DATA_SIZE \\
     {PRESENTATION_SIZE}u
@@ -185,7 +202,7 @@ def main():
 
     header_changed = write_if_changed(
         output_h,
-        emit_header().encode("ascii"),
+        emit_header(card).encode("ascii"),
     )
 
     source_changed = write_if_changed(
