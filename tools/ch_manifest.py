@@ -7,7 +7,7 @@ carryhandle.cfg is host/build metadata.
 It is not intended to be parsed by the GameCube executable.
 """
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import argparse
 import configparser
 import re
@@ -112,6 +112,39 @@ def require_section(
         )
 
     return parser[section]
+
+
+def require_asset_path(
+    value,
+    field,
+):
+    require_ascii(
+        value,
+        field,
+        maximum=255,
+    )
+
+    if "\\" in value:
+        fail(
+            f"{field} must use '/' path separators"
+        )
+
+    parsed = PurePosixPath(value)
+
+    if parsed.is_absolute():
+        fail(
+            f"{field} must be relative to carryhandle.cfg"
+        )
+
+    if any(
+        part in ("", ".", "..")
+        for part in parsed.parts
+    ):
+        fail(
+            f"{field} contains an invalid path component"
+        )
+
+    return value
 
 
 def load_manifest(path):
@@ -233,6 +266,47 @@ def load_manifest(path):
             "letters, digits, '.', '_' and '-'"
         )
 
+    memcard = None
+
+    if "memcard" in parser:
+        card = require_section(
+            parser,
+            "memcard",
+            (
+                "filename",
+                "title",
+                "comment",
+                "banner",
+                "icon",
+            ),
+        )
+
+        memcard = {
+            "filename": require_ascii(
+                card["filename"],
+                "memcard.filename",
+                maximum=32,
+            ),
+            "title": require_ascii(
+                card["title"],
+                "memcard.title",
+                maximum=31,
+            ),
+            "comment": require_ascii(
+                card["comment"],
+                "memcard.comment",
+                maximum=31,
+            ),
+            "banner": require_asset_path(
+                card["banner"],
+                "memcard.banner",
+            ),
+            "icon": require_asset_path(
+                card["icon"],
+                "memcard.icon",
+            ),
+        }
+
     return {
         "manifest_version": version,
         "name": name,
@@ -241,9 +315,8 @@ def load_manifest(path):
         "region": region,
         "region_bi2": REGIONS[region],
         "store_id": store_id,
-        "has_memcard": (
-            "memcard" in parser
-        ),
+        "has_memcard": memcard is not None,
+        "memcard": memcard,
     }
 
 
@@ -394,6 +467,34 @@ def main():
         f"  memcard      : "
         f"{'yes' if manifest['has_memcard'] else 'no'}"
     )
+
+    if manifest["memcard"] is not None:
+        card = manifest["memcard"]
+
+        print(
+            f"  card filename: "
+            f"{card['filename']}"
+        )
+
+        print(
+            f"  card title   : "
+            f"{card['title']}"
+        )
+
+        print(
+            f"  card comment : "
+            f"{card['comment']}"
+        )
+
+        print(
+            f"  card banner  : "
+            f"{card['banner']}"
+        )
+
+        print(
+            f"  card icon    : "
+            f"{card['icon']}"
+        )
 
     return 0
 
