@@ -49,11 +49,6 @@ bool HelloCardSmokeTest(void)
 
     CH_ApplicationSaveSession save = {0};
 
-    const CH_TxSectorBackend *backend;
-
-    void *sectorBuffer;
-
-    size_t sectorBufferSize;
     size_t objectSize = 0u;
 
     uint8_t output[
@@ -146,43 +141,14 @@ bool HelloCardSmokeTest(void)
     );
 
 
-    backend =
-        CH_ApplicationSaveBackend(
-            &save
-        );
-
-    sectorBuffer =
-        CH_ApplicationSaveSectorBuffer(
-            &save
-        );
-
-    sectorBufferSize =
-        CH_ApplicationSaveSectorBufferSize(
-            &save
-        );
-
-
-    if (
-        !backend ||
-        !sectorBuffer ||
-        sectorBufferSize == 0u
-    )
-    {
-        printf("Store access  : FAIL\n");
-        goto cleanup;
-    }
-
-
     /*
      * Application policy remains outside the generic lifecycle:
      * seed this object only on physical first creation.
      */
     if (created)
     {
-        if (CH_PersistPut(
-                backend,
-                sectorBuffer,
-                sectorBufferSize,
+        if (CH_ApplicationSavePut(
+                &save,
                 NULL,
                 0u,
                 helloPersistKey,
@@ -275,33 +241,6 @@ bool HelloCardSmokeTest(void)
     printf("Store reopen  : PASS\n");
 
 
-    backend =
-        CH_ApplicationSaveBackend(
-            &save
-        );
-
-    sectorBuffer =
-        CH_ApplicationSaveSectorBuffer(
-            &save
-        );
-
-    sectorBufferSize =
-        CH_ApplicationSaveSectorBufferSize(
-            &save
-        );
-
-
-    if (
-        !backend ||
-        !sectorBuffer ||
-        sectorBufferSize == 0u
-    )
-    {
-        printf("Store access  : reopen FAIL\n");
-        goto cleanup;
-    }
-
-
     memset(
         output,
         0,
@@ -312,10 +251,8 @@ bool HelloCardSmokeTest(void)
         0u;
 
 
-    if (CH_PersistGet(
-            backend,
-            sectorBuffer,
-            sectorBufferSize,
+    if (CH_ApplicationSaveGet(
+            &save,
             NULL,
             0u,
             helloPersistKey,

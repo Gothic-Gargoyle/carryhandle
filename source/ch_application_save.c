@@ -718,3 +718,102 @@ bool CH_ApplicationSaveWasCreated(
         session->open &&
         session->created;
 }
+
+CH_PersistResult CH_ApplicationSaveGet(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    void *output,
+    size_t output_capacity,
+    size_t *output_size)
+{
+    if (
+        !session ||
+        !session->open
+    )
+    {
+        return
+            CH_PERSIST_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    return
+        CH_PersistGet(
+            &session->tx_backend,
+            session->sector_buffer,
+            session->sector_buffer_size,
+            scope,
+            scope_size,
+            key,
+            key_size,
+            output,
+            output_capacity,
+            output_size
+        );
+}
+
+
+CH_PersistResult CH_ApplicationSavePut(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *payload,
+    size_t payload_size)
+{
+    if (
+        !session ||
+        !session->open
+    )
+    {
+        return
+            CH_PERSIST_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    return
+        CH_PersistPut(
+            &session->tx_backend,
+            session->sector_buffer,
+            session->sector_buffer_size,
+            scope,
+            scope_size,
+            key,
+            key_size,
+            payload,
+            payload_size
+        );
+}
+
+
+CH_PersistResult CH_ApplicationSaveDelete(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size)
+{
+    if (
+        !session ||
+        !session->open
+    )
+    {
+        return
+            CH_PERSIST_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    return
+        CH_PersistDelete(
+            &session->tx_backend,
+            session->sector_buffer,
+            session->sector_buffer_size,
+            scope,
+            scope_size,
+            key,
+            key_size
+        );
+}

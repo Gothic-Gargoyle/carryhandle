@@ -7,6 +7,7 @@
 
 #include <carryhandle/ch_application.h>
 #include <carryhandle/ch_memcard.h>
+#include <carryhandle/ch_persist.h>
 #include <carryhandle/ch_tx.h>
 #include <carryhandle/ch_tx_backend.h>
 #include <carryhandle/ch_tx_memcard_backend.h>
@@ -216,6 +217,49 @@ size_t CH_ApplicationSaveSectorBufferSize(
  */
 bool CH_ApplicationSaveWasCreated(
     const CH_ApplicationSaveSession *session
+);
+
+
+/*
+ * Persistent-object access scoped to an open application-save session.
+ *
+ * These are convenience wrappers around CH_PersistGet/Put/Delete. They
+ * deliberately hide the session's transaction backend and scratch buffer
+ * from normal application code.
+ *
+ * scope/key/payload semantics and result values are exactly those of the
+ * corresponding CH_Persist* operation.
+ *
+ * A NULL or closed session returns
+ * CH_PERSIST_RESULT_INVALID_ARGUMENT.
+ */
+CH_PersistResult CH_ApplicationSaveGet(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    void *output,
+    size_t output_capacity,
+    size_t *output_size
+);
+
+CH_PersistResult CH_ApplicationSavePut(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *payload,
+    size_t payload_size
+);
+
+CH_PersistResult CH_ApplicationSaveDelete(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size
 );
 
 
