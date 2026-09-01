@@ -15,5 +15,6 @@
 #include <carryhandle/ch_tx_format.h>
 #include <carryhandle/ch_tx_backend.h>
 #include <carryhandle/ch_tx.h>
+#include <carryhandle/ch_persist.h>
 
 #endif
