@@ -82,6 +82,37 @@ CH_PersistResult CH_PersistGet(
 );
 
 
+/*
+ * Atomically replace the persistent object identified by exact binary
+ * scope + key with the supplied blob.
+ *
+ * scope is optional; key is required and non-empty.
+ * data may be NULL only when data_size == 0.
+ *
+ * A zero-byte PUT creates an existing zero-byte object; it is distinct
+ * from DELETE.
+ *
+ * Codec selection is an implementation detail. Callers always supply the
+ * original uncompressed blob.
+ *
+ * CH_PERSIST_RESULT_COMMIT_UNCERTAIN means the publication boundary may
+ * have become durable. Recover storage state before attempting another
+ * write.
+ */
+CH_PersistResult CH_PersistPut(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *data,
+    size_t data_size
+);
+
+
+
 #ifdef __cplusplus
 }
 #endif

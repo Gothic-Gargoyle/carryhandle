@@ -194,3 +194,117 @@ CH_PersistResult CH_PersistGet(
     return
         CH_PERSIST_RESULT_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Persistent object PUT                                                     */
+/* ------------------------------------------------------------------------- */
+
+static uint32_t persistCrc32(
+    const void *data,
+    size_t size)
+{
+    const uint8_t *bytes =
+        (const uint8_t *)data;
+
+    uint32_t crc =
+        0xffffffffu;
+
+    size_t i;
+    unsigned bit;
+
+    for (i = 0u; i < size; ++i)
+    {
+        crc ^=
+            bytes[i];
+
+        for (bit = 0u; bit < 8u; ++bit)
+        {
+            uint32_t mask =
+                0u - (crc & 1u);
+
+            crc =
+                (crc >> 1) ^
+                (0xedb88320u & mask);
+        }
+    }
+
+    return
+        crc ^ 0xffffffffu;
+}
+
+
+CH_PersistResult CH_PersistPut(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *data,
+    size_t data_size)
+{
+    CH_TxAppendRequest request = {0};
+
+    CH_TxResult result;
+
+    if (
+        (!data && data_size != 0u) ||
+        data_size > UINT32_MAX
+    )
+    {
+        return
+            CH_PERSIST_RESULT_INVALID_ARGUMENT;
+    }
+
+    request.operation =
+        CH_TX_OPERATION_PUT;
+
+    request.scope =
+        scope;
+
+    request.scope_size =
+        scope_size;
+
+    request.key =
+        key;
+
+    request.key_size =
+        key_size;
+
+    /*
+     * Initial persistent-object writer stores raw bytes directly.
+     * Codec policy remains hidden behind this API and can change later.
+     */
+    request.stored_payload =
+        data;
+
+    request.stored_size =
+        data_size;
+
+    request.raw_size =
+        (uint32_t)data_size;
+
+    request.raw_crc32 =
+        persistCrc32(
+            data,
+            data_size
+        );
+
+    request.codec =
+        CH_TX_CODEC_NONE;
+
+    result =
+        CH_TxAppendRecord(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &request,
+            NULL
+        );
+
+    return
+        persistResultFromTx(
+            result
+        );
+}
