@@ -1404,3 +1404,157 @@ CH_TxResult CH_TxAppendRecord(
     return
         CH_TX_RESULT_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Committed-log cursor                                                      */
+/* ------------------------------------------------------------------------- */
+
+CH_TxResult CH_TxOpenLogCursor(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    CH_TxLogCursor *cursor)
+{
+    CH_TxSuperblock authoritative;
+    CH_TxLogCursor next;
+
+    CH_TxResult result;
+
+    uint32_t authoritativeSector;
+
+    if (!cursor)
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    result =
+        CH_TxReadAuthoritativeSuperblock(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &authoritative,
+            &authoritativeSector
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+    (void)authoritativeSector;
+
+    next.generation =
+        authoritative.generation;
+
+    next.next_sector =
+        authoritative.log_start_sector;
+
+    next.end_sector =
+        authoritative.log_end_sector;
+
+    *cursor =
+        next;
+
+    return
+        CH_TX_RESULT_OK;
+}
+
+
+CH_TxResult CH_TxReadNextRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    CH_TxLogCursor *cursor,
+    uint32_t *record_sector,
+    CH_TxRecordHeader *record)
+{
+    CH_TxRecordHeader nextRecord;
+
+    CH_TxResult result;
+
+    uint32_t currentSector;
+    uint32_t nextSector;
+
+    if (
+        !cursor ||
+        !record_sector ||
+        !record
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    if (
+        cursor->next_sector >
+            cursor->end_sector
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    if (
+        cursor->next_sector ==
+            cursor->end_sector
+    )
+    {
+        return
+            CH_TX_RESULT_END;
+    }
+
+    currentSector =
+        cursor->next_sector;
+
+    result =
+        CH_TxReadRecord(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            cursor->end_sector,
+            currentSector,
+            &nextRecord,
+            NULL,
+            0u,
+            NULL,
+            0u,
+            NULL,
+            0u
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+    if (
+        nextRecord.record_sectors >
+            cursor->end_sector -
+            currentSector
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    nextSector =
+        currentSector +
+        nextRecord.record_sectors;
+
+    /*
+     * Only publish outputs/cursor advancement after the complete record
+     * has validated successfully.
+     */
+    *record_sector =
+        currentSector;
+
+    *record =
+        nextRecord;
+
+    cursor->next_sector =
+        nextSector;
+
+    return
+        CH_TX_RESULT_OK;
+}

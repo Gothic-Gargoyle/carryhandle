@@ -12,6 +12,11 @@ typedef enum CH_TxResult
 {
     CH_TX_RESULT_OK = 0,
 
+    /*
+     * Normal iterator completion. This is not an error.
+     */
+    CH_TX_RESULT_END = 1,
+
     CH_TX_RESULT_INVALID_ARGUMENT = -1,
     CH_TX_RESULT_IO = -2,
     CH_TX_RESULT_CORRUPT = -3,
@@ -26,6 +31,60 @@ typedef enum CH_TxResult
     CH_TX_RESULT_COMMIT_UNCERTAIN = -6
 
 } CH_TxResult;
+
+
+/*
+ * Cursor over the records visible in one recovered committed state.
+ *
+ * Opening a cursor snapshots the authoritative log_end. Records appended
+ * later are deliberately not visible through that cursor.
+ */
+typedef struct CH_TxLogCursor
+{
+    uint32_t generation;
+    uint32_t next_sector;
+    uint32_t end_sector;
+
+} CH_TxLogCursor;
+
+
+/*
+ * Recover authoritative transaction state and initialize a committed-log
+ * cursor at log_start.
+ */
+CH_TxResult CH_TxOpenLogCursor(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    CH_TxLogCursor *cursor
+);
+
+
+/*
+ * Read and validate the next committed record.
+ *
+ * This performs a validation-only CH_TxReadRecord(): record body bytes are
+ * CRC-checked but are not copied out.
+ *
+ * On CH_TX_RESULT_OK:
+ *   record_sector and record are written
+ *   cursor advances by record->record_sectors
+ *
+ * On CH_TX_RESULT_END:
+ *   cursor was already at end_sector
+ *   outputs and cursor are unchanged
+ *
+ * On error:
+ *   outputs and cursor are unchanged
+ */
+CH_TxResult CH_TxReadNextRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    CH_TxLogCursor *cursor,
+    uint32_t *record_sector,
+    CH_TxRecordHeader *record
+);
 
 
 /*
