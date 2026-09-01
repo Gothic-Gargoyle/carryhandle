@@ -663,3 +663,420 @@ CH_TxResult CH_TxReadRecord(
     return
         CH_TX_RESULT_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Durable uncommitted record writer                                         */
+/* ------------------------------------------------------------------------- */
+
+static uint32_t bodyCrcParts(
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *stored_payload,
+    size_t stored_size)
+{
+    uint32_t crc =
+        0xffffffffu;
+
+    if (scope_size > 0u)
+    {
+        crc =
+            bodyCrcUpdate(
+                crc,
+                (const uint8_t *)scope,
+                scope_size
+            );
+    }
+
+    if (key_size > 0u)
+    {
+        crc =
+            bodyCrcUpdate(
+                crc,
+                (const uint8_t *)key,
+                key_size
+            );
+    }
+
+    if (stored_size > 0u)
+    {
+        crc =
+            bodyCrcUpdate(
+                crc,
+                (const uint8_t *)stored_payload,
+                stored_size
+            );
+    }
+
+    return
+        crc ^ 0xffffffffu;
+}
+
+
+static size_t copyInputBodyChunk(
+    uint8_t *destination,
+    size_t capacity,
+    size_t body_offset,
+    const uint8_t *scope,
+    size_t scope_size,
+    const uint8_t *key,
+    size_t key_size,
+    const uint8_t *stored_payload,
+    size_t stored_size)
+{
+    size_t scopeEnd =
+        scope_size;
+
+    size_t keyEnd =
+        scope_size + key_size;
+
+    size_t bodyEnd =
+        keyEnd + stored_size;
+
+    size_t cursor =
+        body_offset;
+
+    size_t copied =
+        0u;
+
+    size_t amount;
+
+    while (
+        copied < capacity &&
+        cursor < bodyEnd
+    )
+    {
+        if (cursor < scopeEnd)
+        {
+            amount =
+                scopeEnd - cursor;
+
+            if (amount > capacity - copied)
+            {
+                amount =
+                    capacity - copied;
+            }
+
+            memcpy(
+                destination + copied,
+                scope + cursor,
+                amount
+            );
+        }
+        else if (cursor < keyEnd)
+        {
+            amount =
+                keyEnd - cursor;
+
+            if (amount > capacity - copied)
+            {
+                amount =
+                    capacity - copied;
+            }
+
+            memcpy(
+                destination + copied,
+                key + (cursor - scopeEnd),
+                amount
+            );
+        }
+        else
+        {
+            amount =
+                bodyEnd - cursor;
+
+            if (amount > capacity - copied)
+            {
+                amount =
+                    capacity - copied;
+            }
+
+            memcpy(
+                destination + copied,
+                stored_payload +
+                    (cursor - keyEnd),
+                amount
+            );
+        }
+
+        cursor += amount;
+        copied += amount;
+    }
+
+    return copied;
+}
+
+
+CH_TxResult CH_TxWriteUncommittedRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    uint32_t record_sector,
+    const CH_TxRecordHeader *record_template,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *stored_payload,
+    size_t stored_size,
+    CH_TxRecordHeader *written_record)
+{
+    CH_TxRecordHeader record;
+
+    uint8_t *sectorBytes;
+
+    size_t bodySize;
+    size_t bodyOffset;
+    size_t dataOffset;
+    size_t available;
+    size_t copied;
+
+    uint32_t sectorIndex;
+
+    if (
+        !CH_TxSectorBackendValid(backend) ||
+        !sector_buffer ||
+        !record_template ||
+        sector_buffer_size <
+            backend->sector_size ||
+        !CH_TxSectorBufferValid(
+            backend,
+            sector_buffer) ||
+        backend->sector_size <
+            CH_TX_RECORD_HEADER_ENCODED_SIZE ||
+        record_sector <
+            CH_TX_DATA_START_SECTOR ||
+        scope_size > UINT32_MAX ||
+        key_size == 0u ||
+        key_size > UINT32_MAX ||
+        stored_size > UINT32_MAX ||
+        (!scope && scope_size != 0u) ||
+        !key ||
+        (!stored_payload &&
+            stored_size != 0u)
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    if (
+        scope_size >
+            SIZE_MAX - key_size ||
+        scope_size + key_size >
+            SIZE_MAX - stored_size
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    bodySize =
+        scope_size +
+        key_size +
+        stored_size;
+
+    record =
+        *record_template;
+
+    record.scope_size =
+        (uint32_t)scope_size;
+
+    record.key_size =
+        (uint32_t)key_size;
+
+    record.stored_size =
+        (uint32_t)stored_size;
+
+    record.body_crc32 =
+        bodyCrcParts(
+            scope,
+            scope_size,
+            key,
+            key_size,
+            stored_payload,
+            stored_size
+        );
+
+    record.record_sectors =
+        CH_TxRecordSectorCount(
+            scope_size,
+            key_size,
+            stored_size,
+            backend->sector_size
+        );
+
+    record.reserved =
+        0u;
+
+    if (
+        record.record_sectors == 0u ||
+        record_sector >
+            backend->sector_count ||
+        record.record_sectors >
+            backend->sector_count -
+            record_sector
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    sectorBytes =
+        (uint8_t *)sector_buffer;
+
+    bodyOffset =
+        0u;
+
+    for (
+        sectorIndex = 0u;
+        sectorIndex <
+            record.record_sectors;
+        ++sectorIndex
+    )
+    {
+        memset(
+            sectorBytes,
+            0,
+            backend->sector_size
+        );
+
+        dataOffset =
+            sectorIndex == 0u
+            ? CH_TX_RECORD_HEADER_ENCODED_SIZE
+            : 0u;
+
+        if (
+            sectorIndex == 0u &&
+            !CH_TxEncodeRecordHeader(
+                sectorBytes,
+                backend->sector_size,
+                &record)
+        )
+        {
+            return
+                CH_TX_RESULT_INVALID_ARGUMENT;
+        }
+
+        available =
+            (size_t)backend->sector_size -
+            dataOffset;
+
+        copied =
+            copyInputBodyChunk(
+                sectorBytes + dataOffset,
+                available,
+                bodyOffset,
+                (const uint8_t *)scope,
+                scope_size,
+                (const uint8_t *)key,
+                key_size,
+                (const uint8_t *)stored_payload,
+                stored_size
+            );
+
+        bodyOffset +=
+            copied;
+
+        if (!backend->write_sector(
+                backend->context,
+                record_sector +
+                    sectorIndex,
+                sector_buffer))
+        {
+            return
+                CH_TX_RESULT_IO;
+        }
+    }
+
+    if (bodyOffset != bodySize)
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    if (!backend->sync(
+            backend->context))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+    /*
+     * Durability alone is not sufficient. Read the bytes back through
+     * the same validator used for committed records before allowing the
+     * append stage to succeed.
+     */
+    {
+        CH_TxRecordHeader readback;
+        CH_TxResult readResult;
+
+        uint32_t recordEnd =
+            record_sector +
+            record.record_sectors;
+
+        readResult =
+            CH_TxReadRecord(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                recordEnd,
+                record_sector,
+                &readback,
+                NULL,
+                0u,
+                NULL,
+                0u,
+                NULL,
+                0u
+            );
+
+        if (readResult !=
+            CH_TX_RESULT_OK)
+        {
+            return
+                readResult;
+        }
+
+        if (
+            readback.operation !=
+                record.operation ||
+            readback.generation !=
+                record.generation ||
+            readback.flags !=
+                record.flags ||
+            readback.scope_size !=
+                record.scope_size ||
+            readback.key_size !=
+                record.key_size ||
+            readback.raw_size !=
+                record.raw_size ||
+            readback.stored_size !=
+                record.stored_size ||
+            readback.raw_crc32 !=
+                record.raw_crc32 ||
+            readback.body_crc32 !=
+                record.body_crc32 ||
+            readback.record_sectors !=
+                record.record_sectors ||
+            readback.codec !=
+                record.codec ||
+            readback.reserved !=
+                record.reserved
+        )
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+    }
+
+    if (written_record)
+    {
+        *written_record =
+            record;
+    }
+
+    return
+        CH_TX_RESULT_OK;
+}
