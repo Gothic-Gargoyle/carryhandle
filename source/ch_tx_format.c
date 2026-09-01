@@ -347,7 +347,7 @@ static bool validSuperblock(
         ) &&
         superblock->container_sectors >=
             CH_TX_DATA_START_SECTOR &&
-        superblock->log_start_sector ==
+        superblock->log_start_sector >=
             CH_TX_DATA_START_SECTOR &&
         superblock->log_end_sector >=
             superblock->log_start_sector &&

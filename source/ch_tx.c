@@ -8,19 +8,28 @@ static bool superblockGeometryMatches(
     const CH_TxSectorBackend *backend,
     const CH_TxSuperblock *superblock)
 {
+    CH_TxArenaBounds arena;
+
     if (
         !backend ||
-        !superblock
+        !superblock ||
+        superblock->sector_size !=
+            backend->sector_size ||
+        superblock->container_sectors !=
+            backend->sector_count
     )
     {
         return false;
     }
 
     return
-        superblock->sector_size ==
-            backend->sector_size &&
-        superblock->container_sectors ==
-            backend->sector_count;
+        CH_TxArenaBoundsForLog(
+            backend->sector_count,
+            superblock->log_start_sector,
+            superblock->log_end_sector,
+            &arena,
+            NULL
+        );
 }
 
 
@@ -393,11 +402,24 @@ CH_TxResult CH_TxInitialize(
     superblock.container_sectors =
         backend->sector_count;
 
-    superblock.log_start_sector =
-        CH_TX_DATA_START_SECTOR;
+    {
+        CH_TxArenaBounds arena;
 
-    superblock.log_end_sector =
-        CH_TX_DATA_START_SECTOR;
+        if (!CH_TxArenaBoundsForIndex(
+                backend->sector_count,
+                0u,
+                &arena))
+        {
+            return
+                CH_TX_RESULT_INVALID_ARGUMENT;
+        }
+
+        superblock.log_start_sector =
+            arena.start_sector;
+
+        superblock.log_end_sector =
+            arena.start_sector;
+    }
 
     superblock.flags =
         0u;
@@ -1405,16 +1427,9 @@ CH_TxResult CH_TxPublishSuperblock(
      * backend and a valid transaction log.
      */
     if (
-        authoritative->sector_size !=
-            backend->sector_size ||
-        authoritative->container_sectors !=
-            backend->sector_count ||
-        authoritative->log_start_sector !=
-            CH_TX_DATA_START_SECTOR ||
-        authoritative->log_end_sector <
-            authoritative->log_start_sector ||
-        authoritative->log_end_sector >
-            backend->sector_count
+        !superblockGeometryMatches(
+            backend,
+            authoritative)
     )
     {
         return
@@ -1427,13 +1442,33 @@ CH_TxResult CH_TxPublishSuperblock(
      */
     if (
         new_log_end_sector <=
-            authoritative->log_end_sector ||
-        new_log_end_sector >
-            backend->sector_count
+            authoritative->log_end_sector
     )
     {
         return
             CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    {
+        CH_TxArenaBounds arena;
+
+        if (!CH_TxArenaBoundsForLog(
+                backend->sector_count,
+                authoritative->log_start_sector,
+                authoritative->log_end_sector,
+                &arena,
+                NULL))
+        {
+            return
+                CH_TX_RESULT_INVALID_ARGUMENT;
+        }
+
+        if (new_log_end_sector >
+            arena.end_sector)
+        {
+            return
+                CH_TX_RESULT_NO_SPACE;
+        }
     }
 
     next =
@@ -1561,6 +1596,43 @@ CH_TxResult CH_TxAppendRecord(
     if (result != CH_TX_RESULT_OK)
     {
         return result;
+    }
+
+    {
+        CH_TxArenaBounds arena;
+
+        uint32_t requiredSectors =
+            CH_TxRecordSectorCount(
+                request->scope_size,
+                request->key_size,
+                request->stored_size,
+                backend->sector_size
+            );
+
+        if (
+            requiredSectors == 0u ||
+            !CH_TxArenaBoundsForLog(
+                backend->sector_count,
+                authoritative.log_start_sector,
+                authoritative.log_end_sector,
+                &arena,
+                NULL
+            )
+        )
+        {
+            return
+                CH_TX_RESULT_INVALID_ARGUMENT;
+        }
+
+        if (
+            requiredSectors >
+            arena.end_sector -
+                authoritative.log_end_sector
+        )
+        {
+            return
+                CH_TX_RESULT_NO_SPACE;
+        }
     }
 
     /*

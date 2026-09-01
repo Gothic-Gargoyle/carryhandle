@@ -14,7 +14,7 @@
  *   sector 0    container metadata
  *   sector 1    superblock A
  *   sector 2    superblock B
- *   sector 3+   append-only records
+ *   sector 3+   two fixed transaction arenas
  *
  * The physical backend is deliberately not part of this interface.
  *
@@ -24,12 +24,124 @@
  */
 
 
-#define CH_TX_FORMAT_VERSION 1u
+#define CH_TX_FORMAT_VERSION 2u
 
 #define CH_TX_METADATA_SECTOR     0u
 #define CH_TX_SUPERBLOCK_A_SECTOR 1u
 #define CH_TX_SUPERBLOCK_B_SECTOR 2u
 #define CH_TX_DATA_START_SECTOR   3u
+
+/*
+ * Format v2 divides the data region into two equally sized arenas.
+ *
+ * One arena is authoritative and appendable. The other is reserved as
+ * the destination for the next crash-safe compacted snapshot.
+ *
+ * If the data-sector count is odd, the final sector is deliberately left
+ * unused so both arenas always have identical capacity.
+ */
+#define CH_TX_ARENA_COUNT 2u
+
+#define CH_TX_MIN_CONTAINER_SECTORS     (CH_TX_DATA_START_SECTOR + CH_TX_ARENA_COUNT)
+
+
+typedef struct CH_TxArenaBounds
+{
+    uint32_t start_sector;
+    uint32_t end_sector;
+
+} CH_TxArenaBounds;
+
+
+static inline bool CH_TxArenaBoundsForIndex(
+    uint32_t container_sectors,
+    uint32_t arena_index,
+    CH_TxArenaBounds *bounds)
+{
+    uint32_t dataSectors;
+    uint32_t arenaSectors;
+
+    if (
+        !bounds ||
+        arena_index >= CH_TX_ARENA_COUNT ||
+        container_sectors <
+            CH_TX_MIN_CONTAINER_SECTORS
+    )
+    {
+        return false;
+    }
+
+    dataSectors =
+        container_sectors -
+        CH_TX_DATA_START_SECTOR;
+
+    arenaSectors =
+        dataSectors /
+        CH_TX_ARENA_COUNT;
+
+    if (arenaSectors == 0u)
+    {
+        return false;
+    }
+
+    bounds->start_sector =
+        CH_TX_DATA_START_SECTOR +
+        arena_index * arenaSectors;
+
+    bounds->end_sector =
+        bounds->start_sector +
+        arenaSectors;
+
+    return true;
+}
+
+
+static inline bool CH_TxArenaBoundsForLog(
+    uint32_t container_sectors,
+    uint32_t log_start_sector,
+    uint32_t log_end_sector,
+    CH_TxArenaBounds *bounds,
+    uint32_t *arena_index)
+{
+    uint32_t i;
+
+    for (i = 0u; i < CH_TX_ARENA_COUNT; ++i)
+    {
+        CH_TxArenaBounds candidate;
+
+        if (!CH_TxArenaBoundsForIndex(
+                container_sectors,
+                i,
+                &candidate))
+        {
+            return false;
+        }
+
+        if (
+            log_start_sector ==
+                candidate.start_sector &&
+            log_end_sector >=
+                candidate.start_sector &&
+            log_end_sector <=
+                candidate.end_sector
+        )
+        {
+            if (bounds)
+            {
+                *bounds = candidate;
+            }
+
+            if (arena_index)
+            {
+                *arena_index = i;
+            }
+
+            return true;
+        }
+    }
+
+    return false;
+}
 
 
 /*
@@ -104,8 +216,9 @@ typedef struct CH_TxContainerHeader
 /*
  * Authoritative committed state.
  *
- * log_end_sector points one sector past the last committed record.
- * Anything physically present beyond log_end_sector is invisible.
+ * log_start_sector identifies the currently active arena.
+ * log_end_sector points one sector past its last committed record.
+ * The other arena is not part of the authoritative snapshot.
  */
 typedef struct CH_TxSuperblock
 {

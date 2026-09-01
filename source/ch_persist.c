@@ -40,6 +40,10 @@ static CH_PersistResult persistResultFromTx(
             return
                 CH_PERSIST_RESULT_COMMIT_UNCERTAIN;
 
+        case CH_TX_RESULT_NO_SPACE:
+            return
+                CH_PERSIST_RESULT_NO_SPACE;
+
         case CH_TX_RESULT_END:
         default:
             /*

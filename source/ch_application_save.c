@@ -158,7 +158,7 @@ static bool descriptorValid(
         !descriptor->filename ||
         descriptor->filename[0] == '\0' ||
         descriptor->sector_count <
-            CH_TX_DATA_START_SECTOR
+            CH_TX_MIN_CONTAINER_SECTORS
     )
     {
         return false;

@@ -34,7 +34,8 @@ typedef enum CH_TxResult
      * state began. The caller must not assume whether the transaction
      * committed; recover transaction state before performing more writes.
      */
-    CH_TX_RESULT_COMMIT_UNCERTAIN = -6
+    CH_TX_RESULT_COMMIT_UNCERTAIN = -6,
+    CH_TX_RESULT_NO_SPACE = -7
 
 } CH_TxResult;
 
