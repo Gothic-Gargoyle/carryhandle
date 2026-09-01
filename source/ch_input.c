@@ -73,7 +73,7 @@ void CH_InputPoll(void)
         );
 
         state->connected =
-            (connectedMask & PAD_CHAN_BIT(port)) != 0;
+            (connectedMask & (1u << port)) != 0;
 
         if (!state->connected)
             continue;
