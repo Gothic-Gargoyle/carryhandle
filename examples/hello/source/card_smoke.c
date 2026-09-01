@@ -1,4 +1,5 @@
 #include "card_smoke.h"
+#include "tx_backend_smoke.h"
 
 #include <carryhandle/carryhandle.h>
 
@@ -46,6 +47,7 @@ bool HelloCardSmokeTest(void)
     bool fileOpen = false;
     bool created = false;
     bool presentationOk = false;
+    bool backendOk = false;
 
     app = CH_ApplicationGetInfo();
 
@@ -233,6 +235,43 @@ bool HelloCardSmokeTest(void)
     );
 
 
+    /*
+     * Close the presentation file before opening the dedicated
+     * transaction-backend smoke file.
+     */
+    closeResult =
+        CH_MemCardClose(
+            &file
+        );
+
+    if (closeResult != CARD_ERROR_READY)
+    {
+        printf(
+            "CARD close    : FAIL (%ld)\n",
+            (long)closeResult
+        );
+
+        goto cleanup;
+    }
+
+    fileOpen = false;
+
+
+    backendOk =
+        HelloTxBackendSmokeTest(
+            &session,
+            sectorBuffer,
+            (u32)sectorSize
+        );
+
+    printf(
+        "TX backend    : %s\n",
+        backendOk
+            ? "PASS"
+            : "FAIL"
+    );
+
+
 cleanup:
 
     if (fileOpen)
@@ -287,5 +326,5 @@ cleanup:
         "CARD cleanup  : PASS\n"
     );
 
-    return presentationOk;
+    return presentationOk && backendOk;
 }
