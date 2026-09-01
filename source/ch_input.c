@@ -1,5 +1,7 @@
 #include <carryhandle/ch_input.h>
 
+#include "ch_pad_bus.h"
+
 #include <ogc/pad.h>
 
 #include <string.h>
@@ -26,7 +28,7 @@ bool CH_InputInit(void)
 
     CH_InputClearPads();
 
-    if (PAD_Init() == 0)
+    if (!CH_PadBusInit())
         return false;
 
     chInputInitialized =
@@ -50,8 +52,12 @@ void CH_InputPoll(void)
         }
     }
 
-    connectedMask =
-        PAD_ScanPads();
+    if (!CH_PadBusScan(
+            &connectedMask))
+    {
+        CH_InputClearPads();
+        return;
+    }
 
     for (port = 0;
          port < CH_PAD_COUNT;
