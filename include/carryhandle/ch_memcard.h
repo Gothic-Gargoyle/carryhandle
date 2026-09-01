@@ -75,6 +75,22 @@ s32 CH_MemCardCreate(
 
 
 /*
+ * Read data from an opened Memory Card file.
+ *
+ * buffer must be 32-byte aligned.
+ *
+ * Returns CARD_ERROR_READY on success, an underlying CARD_* error,
+ * or CH_MEMCARD_ERROR_INVALID_ARGUMENT.
+ */
+s32 CH_MemCardRead(
+    card_file *file,
+    void *buffer,
+    u32 len,
+    u32 offset
+);
+
+
+/*
  * Close an opened Memory Card file.
  *
  * Returns CARD_ERROR_READY on success or the underlying CARD_* error.

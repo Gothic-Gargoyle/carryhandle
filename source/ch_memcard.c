@@ -210,3 +210,32 @@ s32 CH_MemCardClose(
 
     return CARD_Close(file);
 }
+
+
+s32 CH_MemCardRead(
+    card_file *file,
+    void *buffer,
+    u32 len,
+    u32 offset
+)
+{
+    if (
+        !file
+        || !buffer
+        || len == 0u
+        || (
+            (uintptr_t)buffer
+            & 31u
+        ) != 0u
+    )
+    {
+        return CH_MEMCARD_ERROR_INVALID_ARGUMENT;
+    }
+
+    return CARD_Read(
+        file,
+        buffer,
+        len,
+        offset
+    );
+}
