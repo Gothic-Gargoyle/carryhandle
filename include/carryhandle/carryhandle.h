@@ -16,6 +16,7 @@
 #include <carryhandle/ch_dvd.h>
 #include <carryhandle/ch_input.h>
 #include <carryhandle/ch_rumble.h>
+#include <carryhandle/ch_time.h>
 #include <carryhandle/ch_tx_format.h>
 #include <carryhandle/ch_tx_backend.h>
 #include <carryhandle/ch_tx_memcard_backend.h>

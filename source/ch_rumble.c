@@ -1,4 +1,5 @@
 #include <carryhandle/ch_rumble.h>
+#include <carryhandle/ch_time.h>
 
 #include "ch_pad_bus.h"
 
@@ -6,7 +7,6 @@
 #include <ogc/lwp.h>
 #include <ogc/mutex.h>
 #include <ogc/pad.h>
-#include <ogc/timesupp.h>
 
 #include <limits.h>
 #include <stddef.h>
@@ -47,10 +47,7 @@ static CH_RumblePortState
 
 static uint64_t CH_RumbleNowMs(void)
 {
-    return
-        (uint64_t)ticks_to_millisecs(
-            gettime()
-        );
+    return CH_TimeMilliseconds();
 }
 
 
