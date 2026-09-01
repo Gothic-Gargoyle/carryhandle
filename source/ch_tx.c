@@ -1240,3 +1240,167 @@ CH_TxResult CH_TxPublishSuperblock(
     return
         CH_TX_RESULT_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Transaction record append orchestration                                   */
+/* ------------------------------------------------------------------------- */
+
+CH_TxResult CH_TxAppendRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const CH_TxAppendRequest *request,
+    CH_TxAppendCommit *commit)
+{
+    CH_TxSuperblock authoritative;
+    CH_TxSuperblock published;
+
+    CH_TxRecordHeader recordTemplate = {0};
+    CH_TxRecordHeader written;
+
+    CH_TxResult result;
+
+    uint32_t authoritativeSector;
+    uint32_t publishedSector;
+    uint32_t recordSector;
+    uint32_t recordEnd;
+
+    if (
+        !backend ||
+        !sector_buffer ||
+        !request
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    /*
+     * Recover committed state first.
+     *
+     * IO, CORRUPT and AMBIGUOUS are propagated directly. Nothing has
+     * been written yet at this point.
+     */
+    result =
+        CH_TxReadAuthoritativeSuperblock(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &authoritative,
+            &authoritativeSector
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+    /*
+     * Generation and physical placement are transaction-store state,
+     * not caller-controlled record metadata.
+     */
+    recordTemplate.operation =
+        request->operation;
+
+    recordTemplate.generation =
+        authoritative.generation + 1u;
+
+    recordTemplate.flags =
+        request->flags;
+
+    recordTemplate.raw_size =
+        request->raw_size;
+
+    recordTemplate.raw_crc32 =
+        request->raw_crc32;
+
+    recordTemplate.codec =
+        request->codec;
+
+    recordSector =
+        authoritative.log_end_sector;
+
+    /*
+     * This performs:
+     *
+     *   complete record write
+     *   -> durability sync
+     *   -> normal reader validation
+     *   -> exact metadata verification
+     *
+     * Failure here is still pre-publication and therefore cannot have
+     * changed authoritative transaction state.
+     */
+    result =
+        CH_TxWriteUncommittedRecord(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            recordSector,
+            &recordTemplate,
+            request->scope,
+            request->scope_size,
+            request->key,
+            request->key_size,
+            request->stored_payload,
+            request->stored_size,
+            &written
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+    /*
+     * CH_TxWriteUncommittedRecord() guarantees that the complete record
+     * fits the backend, so this addition cannot overflow uint32_t.
+     */
+    recordEnd =
+        recordSector +
+        written.record_sectors;
+
+    /*
+     * Publication is the only commit boundary.
+     *
+     * In particular, COMMIT_UNCERTAIN must propagate unchanged.
+     */
+    result =
+        CH_TxPublishSuperblock(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &authoritative,
+            authoritativeSector,
+            recordEnd,
+            &published,
+            &publishedSector
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+    /*
+     * Do not expose a partially meaningful result structure on any
+     * failure path. Reaching here means publication definitely synced.
+     */
+    if (commit)
+    {
+        commit->record_sector =
+            recordSector;
+
+        commit->record =
+            written;
+
+        commit->superblock_sector =
+            publishedSector;
+
+        commit->superblock =
+            published;
+    }
+
+    return
+        CH_TX_RESULT_OK;
+}

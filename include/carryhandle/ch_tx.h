@@ -29,6 +29,92 @@ typedef enum CH_TxResult
 
 
 /*
+ * One record to append transactionally.
+ *
+ * CarryHandle owns:
+ *
+ *   generation
+ *   record location
+ *   scope/key/stored sizes in the encoded header
+ *   body CRC
+ *   record sector count
+ *   A/B superblock publication
+ *
+ * raw_size and raw_crc32 describe the original uncompressed PUT payload.
+ * stored_payload/stored_size describe the bytes actually placed in the
+ * transaction log.
+ *
+ * DELETE carries scope + key with no stored payload.
+ */
+typedef struct CH_TxAppendRequest
+{
+    uint32_t operation;
+    uint32_t flags;
+
+    const void *scope;
+    size_t scope_size;
+
+    const void *key;
+    size_t key_size;
+
+    const void *stored_payload;
+    size_t stored_size;
+
+    uint32_t raw_size;
+    uint32_t raw_crc32;
+
+    uint32_t codec;
+
+} CH_TxAppendRequest;
+
+
+/*
+ * Information about a definitely committed append.
+ *
+ * This structure is written only when CH_TxAppendRecord() returns
+ * CH_TX_RESULT_OK.
+ */
+typedef struct CH_TxAppendCommit
+{
+    uint32_t record_sector;
+    CH_TxRecordHeader record;
+
+    uint32_t superblock_sector;
+    CH_TxSuperblock superblock;
+
+} CH_TxAppendCommit;
+
+
+/*
+ * Atomically append and publish one transaction record.
+ *
+ * Sequence:
+ *
+ *   1. recover authoritative A/B state
+ *   2. append record at authoritative log_end
+ *   3. sync record durability
+ *   4. reread and verify record
+ *   5. publish the inactive superblock
+ *   6. sync publication
+ *
+ * CH_TX_RESULT_OK means the new record is definitely committed.
+ *
+ * CH_TX_RESULT_COMMIT_UNCERTAIN means publication I/O began but its
+ * durable outcome cannot be known generically. The caller must recover
+ * authoritative transaction state before performing another write.
+ *
+ * commit is optional and is not modified unless the result is OK.
+ */
+CH_TxResult CH_TxAppendRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const CH_TxAppendRequest *request,
+    CH_TxAppendCommit *commit
+);
+
+
+/*
  * Read and validate one record from the committed log.
  *
  * read_limit_sector is one sector past the last sector visible to the
