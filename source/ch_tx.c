@@ -1558,3 +1558,435 @@ CH_TxResult CH_TxReadNextRecord(
     return
         CH_TX_RESULT_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Exact committed-record identity resolution                                */
+/* ------------------------------------------------------------------------- */
+
+static bool recordIdentityHeaderMatches(
+    const CH_TxRecordHeader *a,
+    const CH_TxRecordHeader *b)
+{
+    return
+        a->operation ==
+            b->operation &&
+        a->generation ==
+            b->generation &&
+        a->flags ==
+            b->flags &&
+        a->scope_size ==
+            b->scope_size &&
+        a->key_size ==
+            b->key_size &&
+        a->raw_size ==
+            b->raw_size &&
+        a->stored_size ==
+            b->stored_size &&
+        a->raw_crc32 ==
+            b->raw_crc32 &&
+        a->body_crc32 ==
+            b->body_crc32 &&
+        a->record_sectors ==
+            b->record_sectors &&
+        a->codec ==
+            b->codec &&
+        a->reserved ==
+            b->reserved;
+}
+
+
+static CH_TxResult recordIdentityMatches(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    uint32_t read_limit_sector,
+    uint32_t record_sector,
+    const CH_TxRecordHeader *record,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    bool *matches)
+{
+    CH_TxRecordHeader reread;
+
+    uint8_t *sectorBytes;
+
+    const uint8_t *scopeBytes =
+        (const uint8_t *)scope;
+
+    const uint8_t *keyBytes =
+        (const uint8_t *)key;
+
+    size_t bodySize;
+    size_t bodyOffset;
+    size_t identityEnd;
+    size_t remaining;
+    size_t dataOffset;
+    size_t available;
+    size_t amount;
+    size_t i;
+    size_t position;
+
+    uint32_t sectorIndex;
+    uint32_t crc;
+
+    bool equal =
+        true;
+
+    if (
+        !CH_TxSectorBackendValid(backend) ||
+        !sector_buffer ||
+        !record ||
+        !matches ||
+        sector_buffer_size <
+            backend->sector_size ||
+        !CH_TxSectorBufferValid(
+            backend,
+            sector_buffer) ||
+        record->scope_size !=
+            scope_size ||
+        record->key_size !=
+            key_size ||
+        (!scope &&
+            scope_size != 0u) ||
+        !key ||
+        key_size == 0u ||
+        scope_size >
+            SIZE_MAX - key_size
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    if (!recordBodySize(
+            record,
+            &bodySize))
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    if (
+        read_limit_sector >
+            backend->sector_count ||
+        record_sector <
+            CH_TX_DATA_START_SECTOR ||
+        record_sector >=
+            read_limit_sector ||
+        record->record_sectors == 0u ||
+        record->record_sectors >
+            read_limit_sector -
+            record_sector
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    identityEnd =
+        scope_size +
+        key_size;
+
+    sectorBytes =
+        (uint8_t *)sector_buffer;
+
+    bodyOffset =
+        0u;
+
+    remaining =
+        bodySize;
+
+    crc =
+        0xffffffffu;
+
+    for (
+        sectorIndex = 0u;
+        sectorIndex <
+            record->record_sectors;
+        ++sectorIndex
+    )
+    {
+        if (!backend->read_sector(
+                backend->context,
+                record_sector +
+                    sectorIndex,
+                sector_buffer))
+        {
+            return
+                CH_TX_RESULT_IO;
+        }
+
+        if (sectorIndex == 0u)
+        {
+            if (!CH_TxDecodeRecordHeader(
+                    &reread,
+                    sectorBytes,
+                    backend->sector_size))
+            {
+                return
+                    CH_TX_RESULT_CORRUPT;
+            }
+
+            /*
+             * The cursor already validated this record once.
+             * Require the second identity pass to observe the same
+             * metadata rather than comparing identity against bytes
+             * from a changed record.
+             */
+            if (!recordIdentityHeaderMatches(
+                    &reread,
+                    record))
+            {
+                return
+                    CH_TX_RESULT_CORRUPT;
+            }
+        }
+
+        dataOffset =
+            sectorIndex == 0u
+            ? CH_TX_RECORD_HEADER_ENCODED_SIZE
+            : 0u;
+
+        available =
+            (size_t)backend->sector_size -
+            dataOffset;
+
+        amount =
+            remaining < available
+            ? remaining
+            : available;
+
+        if (amount > 0u)
+        {
+            crc =
+                bodyCrcUpdate(
+                    crc,
+                    sectorBytes +
+                        dataOffset,
+                    amount
+                );
+
+            /*
+             * Only scope + key participate in identity comparison.
+             * The stored payload is still included in body CRC
+             * validation below.
+             */
+            for (i = 0u; i < amount; ++i)
+            {
+                position =
+                    bodyOffset + i;
+
+                if (position < scope_size)
+                {
+                    if (
+                        sectorBytes[
+                            dataOffset + i
+                        ] !=
+                        scopeBytes[position]
+                    )
+                    {
+                        equal =
+                            false;
+                    }
+                }
+                else if (position < identityEnd)
+                {
+                    if (
+                        sectorBytes[
+                            dataOffset + i
+                        ] !=
+                        keyBytes[
+                            position -
+                            scope_size
+                        ]
+                    )
+                    {
+                        equal =
+                            false;
+                    }
+                }
+            }
+
+            bodyOffset +=
+                amount;
+
+            remaining -=
+                amount;
+        }
+    }
+
+    if (
+        remaining != 0u ||
+        bodyOffset != bodySize
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    crc ^=
+        0xffffffffu;
+
+    if (crc !=
+        record->body_crc32)
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    *matches =
+        equal;
+
+    return
+        CH_TX_RESULT_OK;
+}
+
+
+CH_TxResult CH_TxFindLatestRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    uint32_t *record_sector,
+    CH_TxRecordHeader *record)
+{
+    CH_TxLogCursor cursor;
+
+    CH_TxRecordHeader current;
+    CH_TxRecordHeader candidate;
+
+    CH_TxResult result;
+
+    uint32_t currentSector;
+    uint32_t candidateSector =
+        0u;
+
+    bool found =
+        false;
+
+    bool matches;
+
+    if (
+        !record_sector ||
+        !record ||
+        (!scope &&
+            scope_size != 0u) ||
+        !key ||
+        key_size == 0u ||
+        scope_size > UINT32_MAX ||
+        key_size > UINT32_MAX ||
+        scope_size >
+            SIZE_MAX - key_size
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    result =
+        CH_TxOpenLogCursor(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &cursor
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+    for (;;)
+    {
+        result =
+            CH_TxReadNextRecord(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                &cursor,
+                &currentSector,
+                &current
+            );
+
+        if (result == CH_TX_RESULT_END)
+        {
+            break;
+        }
+
+        if (result != CH_TX_RESULT_OK)
+        {
+            return result;
+        }
+
+        /*
+         * Different lengths can never be the same binary identity.
+         * CH_TxReadNextRecord() has still fully validated the record,
+         * including its body CRC.
+         */
+        if (
+            current.scope_size !=
+                scope_size ||
+            current.key_size !=
+                key_size
+        )
+        {
+            continue;
+        }
+
+        result =
+            recordIdentityMatches(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                cursor.end_sector,
+                currentSector,
+                &current,
+                scope,
+                scope_size,
+                key,
+                key_size,
+                &matches
+            );
+
+        if (result != CH_TX_RESULT_OK)
+        {
+            return result;
+        }
+
+        if (matches)
+        {
+            /*
+             * Physical committed-log order wins. Keep replacing the
+             * candidate as matching records are encountered.
+             */
+            candidateSector =
+                currentSector;
+
+            candidate =
+                current;
+
+            found =
+                true;
+        }
+    }
+
+    if (!found)
+    {
+        return
+            CH_TX_RESULT_NOT_FOUND;
+    }
+
+    *record_sector =
+        candidateSector;
+
+    *record =
+        candidate;
+
+    return
+        CH_TX_RESULT_OK;
+}

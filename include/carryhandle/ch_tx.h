@@ -17,6 +17,12 @@ typedef enum CH_TxResult
      */
     CH_TX_RESULT_END = 1,
 
+    /*
+     * Normal lookup completion: no committed record has the requested
+     * exact scope + key identity.
+     */
+    CH_TX_RESULT_NOT_FOUND = 2,
+
     CH_TX_RESULT_INVALID_ARGUMENT = -1,
     CH_TX_RESULT_IO = -2,
     CH_TX_RESULT_CORRUPT = -3,
@@ -82,6 +88,46 @@ CH_TxResult CH_TxReadNextRecord(
     void *sector_buffer,
     size_t sector_buffer_size,
     CH_TxLogCursor *cursor,
+    uint32_t *record_sector,
+    CH_TxRecordHeader *record
+);
+
+
+/*
+ * Find the physically latest committed record whose scope + key exactly
+ * match the requested binary identity.
+ *
+ * Comparison is byte-exact:
+ *
+ *   scope length + bytes
+ *   key length + bytes
+ *
+ * No string encoding or case folding is applied.
+ *
+ * Physical committed-log order determines the winner. Generation is
+ * transaction metadata and is deliberately not used to order matches.
+ *
+ * The entire committed snapshot is validated even after a match has been
+ * found. Corruption later in the log therefore cannot silently resurrect
+ * an older matching record.
+ *
+ * On CH_TX_RESULT_OK:
+ *   record_sector and record identify the latest matching PUT or DELETE.
+ *
+ * On CH_TX_RESULT_NOT_FOUND:
+ *   no matching committed record exists.
+ *
+ * On NOT_FOUND or error:
+ *   outputs are unchanged.
+ */
+CH_TxResult CH_TxFindLatestRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
     uint32_t *record_sector,
     CH_TxRecordHeader *record
 );
