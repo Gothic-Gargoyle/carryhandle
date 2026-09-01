@@ -17,6 +17,10 @@
  *   sector 3+   append-only records
  *
  * The physical backend is deliberately not part of this interface.
+ *
+ * All persistent multi-byte integers are encoded explicitly as
+ * unsigned 32-bit big-endian values. Native structure layout and host
+ * byte order are never part of the storage ABI.
  */
 
 
@@ -229,14 +233,20 @@ static inline uint32_t CH_TxRecordSectorCount(
         return 0u;
     }
 
-    return (uint32_t)(
+    total =
         (
             total
             + (size_t)sector_size
             - 1u
         )
-        / (size_t)sector_size
-    );
+        / (size_t)sector_size;
+
+    if (total > UINT32_MAX)
+    {
+        return 0u;
+    }
+
+    return (uint32_t)total;
 }
 
 
