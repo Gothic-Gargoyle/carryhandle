@@ -555,3 +555,376 @@ bool CH_TxDecodeSuperblock(
 
     return true;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Record header                                                             */
+/* ------------------------------------------------------------------------- */
+
+enum
+{
+    RECORD_MAGIC_OFFSET = 0,
+    RECORD_VERSION_OFFSET = 4,
+    RECORD_HEADER_SIZE_OFFSET = 8,
+    RECORD_OPERATION_OFFSET = 12,
+    RECORD_GENERATION_OFFSET = 16,
+    RECORD_FLAGS_OFFSET = 20,
+    RECORD_SCOPE_SIZE_OFFSET = 24,
+    RECORD_KEY_SIZE_OFFSET = 28,
+    RECORD_RAW_SIZE_OFFSET = 32,
+    RECORD_STORED_SIZE_OFFSET = 36,
+    RECORD_RAW_CRC_OFFSET = 40,
+    RECORD_STORED_CRC_OFFSET = 44,
+    RECORD_SECTORS_OFFSET = 48,
+    RECORD_CODEC_OFFSET = 52,
+    RECORD_RESERVED_OFFSET = 56,
+    RECORD_CRC_OFFSET = 60
+};
+
+
+static bool validRecordHeader(
+    const CH_TxRecordHeader *record)
+{
+    if (!record)
+    {
+        return false;
+    }
+
+    if (record->key_size == 0u)
+    {
+        return false;
+    }
+
+    if (record->record_sectors == 0u)
+    {
+        return false;
+    }
+
+    if (record->reserved != 0u)
+    {
+        return false;
+    }
+
+    if (record->operation ==
+        CH_TX_OPERATION_DELETE)
+    {
+        return
+            record->codec ==
+                CH_TX_CODEC_NONE &&
+            record->raw_size == 0u &&
+            record->stored_size == 0u &&
+            record->raw_crc32 == 0u &&
+            record->stored_crc32 == 0u;
+    }
+
+    if (record->operation !=
+        CH_TX_OPERATION_PUT)
+    {
+        return false;
+    }
+
+    if (record->codec ==
+        CH_TX_CODEC_NONE)
+    {
+        return
+            record->raw_size ==
+                record->stored_size &&
+            record->raw_crc32 ==
+                record->stored_crc32;
+    }
+
+    if (record->codec ==
+        CH_TX_CODEC_ZLIB)
+    {
+        return
+            record->stored_size > 0u;
+    }
+
+    return false;
+}
+
+
+bool CH_TxEncodeRecordHeader(
+    uint8_t *buffer,
+    size_t buffer_size,
+    const CH_TxRecordHeader *record)
+{
+    uint32_t crc;
+
+    if (
+        !buffer ||
+        !validRecordHeader(record) ||
+        buffer_size <
+            CH_TX_RECORD_HEADER_ENCODED_SIZE
+    )
+    {
+        return false;
+    }
+
+    memset(
+        buffer,
+        0,
+        CH_TX_RECORD_HEADER_ENCODED_SIZE
+    );
+
+    putU32(
+        buffer,
+        RECORD_MAGIC_OFFSET,
+        CH_TX_RECORD_MAGIC
+    );
+
+    putU32(
+        buffer,
+        RECORD_VERSION_OFFSET,
+        CH_TX_FORMAT_VERSION
+    );
+
+    putU32(
+        buffer,
+        RECORD_HEADER_SIZE_OFFSET,
+        CH_TX_RECORD_HEADER_ENCODED_SIZE
+    );
+
+    putU32(
+        buffer,
+        RECORD_OPERATION_OFFSET,
+        record->operation
+    );
+
+    putU32(
+        buffer,
+        RECORD_GENERATION_OFFSET,
+        record->generation
+    );
+
+    putU32(
+        buffer,
+        RECORD_FLAGS_OFFSET,
+        record->flags
+    );
+
+    putU32(
+        buffer,
+        RECORD_SCOPE_SIZE_OFFSET,
+        record->scope_size
+    );
+
+    putU32(
+        buffer,
+        RECORD_KEY_SIZE_OFFSET,
+        record->key_size
+    );
+
+    putU32(
+        buffer,
+        RECORD_RAW_SIZE_OFFSET,
+        record->raw_size
+    );
+
+    putU32(
+        buffer,
+        RECORD_STORED_SIZE_OFFSET,
+        record->stored_size
+    );
+
+    putU32(
+        buffer,
+        RECORD_RAW_CRC_OFFSET,
+        record->raw_crc32
+    );
+
+    putU32(
+        buffer,
+        RECORD_STORED_CRC_OFFSET,
+        record->stored_crc32
+    );
+
+    putU32(
+        buffer,
+        RECORD_SECTORS_OFFSET,
+        record->record_sectors
+    );
+
+    putU32(
+        buffer,
+        RECORD_CODEC_OFFSET,
+        record->codec
+    );
+
+    putU32(
+        buffer,
+        RECORD_RESERVED_OFFSET,
+        0u
+    );
+
+    crc =
+        encodedCrc32(
+            buffer,
+            CH_TX_RECORD_HEADER_ENCODED_SIZE,
+            RECORD_CRC_OFFSET
+        );
+
+    putU32(
+        buffer,
+        RECORD_CRC_OFFSET,
+        crc
+    );
+
+    return true;
+}
+
+
+bool CH_TxDecodeRecordHeader(
+    CH_TxRecordHeader *record,
+    const uint8_t *buffer,
+    size_t buffer_size)
+{
+    CH_TxRecordHeader decoded;
+
+    uint32_t storedCrc;
+    uint32_t calculatedCrc;
+
+    if (
+        !record ||
+        !buffer ||
+        buffer_size <
+            CH_TX_RECORD_HEADER_ENCODED_SIZE
+    )
+    {
+        return false;
+    }
+
+    storedCrc =
+        getU32(
+            buffer,
+            RECORD_CRC_OFFSET
+        );
+
+    calculatedCrc =
+        encodedCrc32(
+            buffer,
+            CH_TX_RECORD_HEADER_ENCODED_SIZE,
+            RECORD_CRC_OFFSET
+        );
+
+    if (storedCrc != calculatedCrc)
+    {
+        return false;
+    }
+
+    memset(
+        &decoded,
+        0,
+        sizeof(decoded)
+    );
+
+    decoded.magic =
+        getU32(
+            buffer,
+            RECORD_MAGIC_OFFSET
+        );
+
+    decoded.version =
+        getU32(
+            buffer,
+            RECORD_VERSION_OFFSET
+        );
+
+    decoded.header_size =
+        getU32(
+            buffer,
+            RECORD_HEADER_SIZE_OFFSET
+        );
+
+    decoded.operation =
+        getU32(
+            buffer,
+            RECORD_OPERATION_OFFSET
+        );
+
+    decoded.generation =
+        getU32(
+            buffer,
+            RECORD_GENERATION_OFFSET
+        );
+
+    decoded.flags =
+        getU32(
+            buffer,
+            RECORD_FLAGS_OFFSET
+        );
+
+    decoded.scope_size =
+        getU32(
+            buffer,
+            RECORD_SCOPE_SIZE_OFFSET
+        );
+
+    decoded.key_size =
+        getU32(
+            buffer,
+            RECORD_KEY_SIZE_OFFSET
+        );
+
+    decoded.raw_size =
+        getU32(
+            buffer,
+            RECORD_RAW_SIZE_OFFSET
+        );
+
+    decoded.stored_size =
+        getU32(
+            buffer,
+            RECORD_STORED_SIZE_OFFSET
+        );
+
+    decoded.raw_crc32 =
+        getU32(
+            buffer,
+            RECORD_RAW_CRC_OFFSET
+        );
+
+    decoded.stored_crc32 =
+        getU32(
+            buffer,
+            RECORD_STORED_CRC_OFFSET
+        );
+
+    decoded.record_sectors =
+        getU32(
+            buffer,
+            RECORD_SECTORS_OFFSET
+        );
+
+    decoded.codec =
+        getU32(
+            buffer,
+            RECORD_CODEC_OFFSET
+        );
+
+    decoded.reserved =
+        getU32(
+            buffer,
+            RECORD_RESERVED_OFFSET
+        );
+
+    decoded.header_crc32 =
+        storedCrc;
+
+    if (
+        decoded.magic !=
+            CH_TX_RECORD_MAGIC ||
+        decoded.version !=
+            CH_TX_FORMAT_VERSION ||
+        decoded.header_size !=
+            CH_TX_RECORD_HEADER_ENCODED_SIZE ||
+        !validRecordHeader(&decoded)
+    )
+    {
+        return false;
+    }
+
+    *record =
+        decoded;
+
+    return true;
+}
