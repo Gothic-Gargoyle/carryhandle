@@ -1080,3 +1080,163 @@ CH_TxResult CH_TxWriteUncommittedRecord(
     return
         CH_TX_RESULT_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Inactive-superblock publication                                           */
+/* ------------------------------------------------------------------------- */
+
+CH_TxResult CH_TxPublishSuperblock(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const CH_TxSuperblock *authoritative,
+    uint32_t authoritative_sector,
+    uint32_t new_log_end_sector,
+    CH_TxSuperblock *published_superblock,
+    uint32_t *published_sector)
+{
+    CH_TxSuperblock next;
+
+    uint32_t inactiveSector;
+
+    if (
+        !CH_TxSectorBackendValid(backend) ||
+        !sector_buffer ||
+        !authoritative ||
+        sector_buffer_size <
+            backend->sector_size ||
+        !CH_TxSectorBufferValid(
+            backend,
+            sector_buffer) ||
+        backend->sector_size <
+            CH_TX_SUPERBLOCK_ENCODED_SIZE
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    /*
+     * Transaction format v1 reserves:
+     *
+     *   sector 1 = superblock A
+     *   sector 2 = superblock B
+     */
+    if (
+        authoritative_sector != 1u &&
+        authoritative_sector != 2u
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    /*
+     * Do not trust a caller-supplied superblock merely because it came
+     * through an internal API. Its geometry must still describe this
+     * backend and a valid transaction log.
+     */
+    if (
+        authoritative->sector_size !=
+            backend->sector_size ||
+        authoritative->container_sectors !=
+            backend->sector_count ||
+        authoritative->log_start_sector !=
+            CH_TX_DATA_START_SECTOR ||
+        authoritative->log_end_sector <
+            authoritative->log_start_sector ||
+        authoritative->log_end_sector >
+            backend->sector_count
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    /*
+     * Publication is specifically an append commit. Every transaction
+     * published through this primitive must advance the visible log.
+     */
+    if (
+        new_log_end_sector <=
+            authoritative->log_end_sector ||
+        new_log_end_sector >
+            backend->sector_count
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    next =
+        *authoritative;
+
+    /*
+     * Unsigned overflow is intentional. Authoritative-state selection
+     * already defines uint32 generation wraparound semantics.
+     */
+    next.generation =
+        authoritative->generation + 1u;
+
+    next.log_end_sector =
+        new_log_end_sector;
+
+    inactiveSector =
+        authoritative_sector == 1u
+        ? 2u
+        : 1u;
+
+    memset(
+        sector_buffer,
+        0,
+        backend->sector_size
+    );
+
+    if (!CH_TxEncodeSuperblock(
+            sector_buffer,
+            backend->sector_size,
+            &next))
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+    if (!backend->write_sector(
+            backend->context,
+            inactiveSector,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_COMMIT_UNCERTAIN;
+    }
+
+    /*
+     * This is the commit point.
+     *
+     * Before this durability barrier succeeds, the previous
+     * authoritative superblock remains the committed state.
+     *
+     * After it succeeds, the newly written generation is committed.
+     */
+    if (!backend->sync(
+            backend->context))
+    {
+        return
+            CH_TX_RESULT_COMMIT_UNCERTAIN;
+    }
+
+    if (published_superblock)
+    {
+        *published_superblock =
+            next;
+    }
+
+    if (published_sector)
+    {
+        *published_sector =
+            inactiveSector;
+    }
+
+    return
+        CH_TX_RESULT_OK;
+}

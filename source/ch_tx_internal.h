@@ -37,4 +37,40 @@ CH_TxResult CH_TxWriteUncommittedRecord(
 );
 
 
+/*
+ * Publish a new committed log end through the inactive A/B superblock.
+ *
+ * authoritative and authoritative_sector describe the currently
+ * authoritative state previously selected by
+ * CH_TxReadAuthoritativeSuperblock().
+ *
+ * The new superblock:
+ *
+ *   - preserves container geometry, log_start and flags
+ *   - increments generation modulo uint32_t
+ *   - advances log_end_sector
+ *   - is written to the inactive A/B sector
+ *   - is definitely committed after backend->sync() succeeds
+ *
+ * Once publication I/O begins, a write or sync failure cannot generically
+ * prove whether new authoritative state reached stable media. Such a
+ * failure returns CH_TX_RESULT_COMMIT_UNCERTAIN. The caller must recover
+ * transaction state before performing another write.
+ *
+ * No post-sync read is performed here. A successful sync is the definite
+ * commit point; returning a later read error would make commit status
+ * unnecessarily ambiguous.
+ */
+CH_TxResult CH_TxPublishSuperblock(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const CH_TxSuperblock *authoritative,
+    uint32_t authoritative_sector,
+    uint32_t new_log_end_sector,
+    CH_TxSuperblock *published_superblock,
+    uint32_t *published_sector
+);
+
+
 #endif

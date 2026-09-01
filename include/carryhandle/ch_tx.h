@@ -16,7 +16,14 @@ typedef enum CH_TxResult
     CH_TX_RESULT_IO = -2,
     CH_TX_RESULT_CORRUPT = -3,
     CH_TX_RESULT_AMBIGUOUS = -4,
-    CH_TX_RESULT_BUFFER_TOO_SMALL = -5
+    CH_TX_RESULT_BUFFER_TOO_SMALL = -5,
+
+    /*
+     * An I/O failure occurred after publication of new authoritative
+     * state began. The caller must not assume whether the transaction
+     * committed; recover transaction state before performing more writes.
+     */
+    CH_TX_RESULT_COMMIT_UNCERTAIN = -6
 
 } CH_TxResult;
 
