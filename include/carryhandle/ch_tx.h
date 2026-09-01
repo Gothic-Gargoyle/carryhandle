@@ -15,9 +15,47 @@ typedef enum CH_TxResult
     CH_TX_RESULT_INVALID_ARGUMENT = -1,
     CH_TX_RESULT_IO = -2,
     CH_TX_RESULT_CORRUPT = -3,
-    CH_TX_RESULT_AMBIGUOUS = -4
+    CH_TX_RESULT_AMBIGUOUS = -4,
+    CH_TX_RESULT_BUFFER_TOO_SMALL = -5
 
 } CH_TxResult;
+
+
+/*
+ * Read and validate one record from the committed log.
+ *
+ * read_limit_sector is one sector past the last sector visible to the
+ * caller. For committed records this should normally be the authoritative
+ * superblock's log_end_sector.
+ *
+ * Validation includes:
+ *
+ *   - encoded record-header CRC and semantics
+ *   - record sector geometry
+ *   - record containment within read_limit_sector
+ *   - exact body CRC over scope || key || stored payload
+ *
+ * scope_output, key_output and stored_output are independently optional.
+ * A NULL output requires a zero capacity. A non-NULL output must have
+ * enough capacity for the corresponding size reported in the header.
+ *
+ * Payload decompression and raw_crc32 validation are deliberately outside
+ * this primitive.
+ */
+CH_TxResult CH_TxReadRecord(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    uint32_t read_limit_sector,
+    uint32_t record_sector,
+    CH_TxRecordHeader *record,
+    void *scope_output,
+    size_t scope_capacity,
+    void *key_output,
+    size_t key_capacity,
+    void *stored_output,
+    size_t stored_capacity
+);
 
 
 /*
