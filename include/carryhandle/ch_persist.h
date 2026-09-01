@@ -113,6 +113,28 @@ CH_PersistResult CH_PersistPut(
 
 
 
+/*
+ * Atomically delete the persistent object identified by exact binary
+ * scope + key.
+ *
+ * Deletion is represented by a committed tombstone. Deleting an object
+ * that is already absent is valid and returns OK.
+ *
+ * CH_PERSIST_RESULT_COMMIT_UNCERTAIN means the publication boundary may
+ * have become durable. Recover storage state before another write.
+ */
+CH_PersistResult CH_PersistDelete(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size
+);
+
+
+
 #ifdef __cplusplus
 }
 #endif

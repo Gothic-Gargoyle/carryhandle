@@ -308,3 +308,65 @@ CH_PersistResult CH_PersistPut(
             result
         );
 }
+
+/* ------------------------------------------------------------------------- */
+/* Persistent object DELETE                                                  */
+/* ------------------------------------------------------------------------- */
+
+CH_PersistResult CH_PersistDelete(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size)
+{
+    CH_TxAppendRequest request = {0};
+
+    CH_TxResult result;
+
+    request.operation =
+        CH_TX_OPERATION_DELETE;
+
+    request.scope =
+        scope;
+
+    request.scope_size =
+        scope_size;
+
+    request.key =
+        key;
+
+    request.key_size =
+        key_size;
+
+    request.stored_payload =
+        NULL;
+
+    request.stored_size =
+        0u;
+
+    request.raw_size =
+        0u;
+
+    request.raw_crc32 =
+        0u;
+
+    request.codec =
+        CH_TX_CODEC_NONE;
+
+    result =
+        CH_TxAppendRecord(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &request,
+            NULL
+        );
+
+    return
+        persistResultFromTx(
+            result
+        );
+}
