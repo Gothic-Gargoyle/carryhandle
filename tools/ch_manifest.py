@@ -14,7 +14,11 @@ import re
 import sys
 
 
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
+
+SUPPORTED_MANIFEST_VERSIONS = frozenset(
+    (1, 2)
+)
 
 REGIONS = {
     "NTSC-J": 0,
@@ -204,7 +208,7 @@ def load_manifest(path):
             "manifest_version must be an integer"
         )
 
-    if version != MANIFEST_VERSION:
+    if version not in SUPPORTED_MANIFEST_VERSIONS:
         fail(
             f"unsupported manifest_version {version}"
         )
@@ -269,17 +273,55 @@ def load_manifest(path):
     memcard = None
 
     if "memcard" in parser:
-        card = require_section(
-            parser,
-            "memcard",
-            (
+        fields = (
+            "filename",
+            "title",
+            "comment",
+            "banner",
+            "icon",
+        )
+
+        if version >= 2:
+            fields = (
                 "filename",
+                "sectors",
                 "title",
                 "comment",
                 "banner",
                 "icon",
-            ),
+            )
+
+        card = require_section(
+            parser,
+            "memcard",
+            fields,
         )
+
+        #
+        # Manifest v1 predates explicit CARD file geometry.
+        # Its historical behaviour was one physical CARD sector.
+        #
+        sectors = 1
+
+        if version >= 2:
+            try:
+                sectors = int(
+                    card["sectors"],
+                    10,
+                )
+            except ValueError:
+                fail(
+                    "memcard.sectors must be an integer"
+                )
+
+            if (
+                sectors < 1
+                or sectors > 0xffffffff
+            ):
+                fail(
+                    "memcard.sectors must be between "
+                    "1 and 4294967295"
+                )
 
         memcard = {
             "filename": require_ascii(
@@ -287,6 +329,7 @@ def load_manifest(path):
                 "memcard.filename",
                 maximum=32,
             ),
+            "sectors": sectors,
             "title": require_ascii(
                 card["title"],
                 "memcard.title",

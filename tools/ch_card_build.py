@@ -46,6 +46,8 @@ def emit_header(card):
         card["filename"]
     )
 
+    sectors = card["sectors"]
+
     return f"""\
 /*
  * GENERATED FILE.
@@ -59,6 +61,9 @@ def emit_header(card):
 
 #define CH_CARD_PRESENTATION_FILENAME \\
     {filename}
+
+#define CH_CARD_FILE_SECTORS \\
+    {sectors}u
 
 #define CH_CARD_PRESENTATION_DATA_SIZE \\
     {PRESENTATION_SIZE}u
@@ -231,6 +236,10 @@ def main():
 
     print(
         f"  filename     : {card['filename']}"
+    )
+
+    print(
+        f"  sectors      : {card['sectors']}"
     )
 
     print(
