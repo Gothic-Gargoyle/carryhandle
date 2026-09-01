@@ -1,4 +1,5 @@
 #include <carryhandle/ch_card_presentation.h>
+#include <carryhandle/ch_memcard.h>
 
 #include <stdint.h>
 #include <string.h>
@@ -182,7 +183,7 @@ bool CH_CardPresentationApply(
      * Preserve the application's existing sector-zero contents.
      */
     result =
-        CARD_Read(
+        CH_MemCardRead(
             file,
             sector,
             (u32)sector_size,
@@ -236,7 +237,7 @@ bool CH_CardPresentationApply(
         );
 
         result =
-            CARD_Write(
+            CH_MemCardWrite(
                 file,
                 sector,
                 (u32)sector_size,
@@ -341,7 +342,7 @@ bool CH_CardPresentationApply(
          * or data changed.
          */
         result =
-            CARD_Read(
+            CH_MemCardRead(
                 file,
                 sector,
                 (u32)sector_size,
