@@ -35,7 +35,8 @@ typedef enum CH_TxResult
      * committed; recover transaction state before performing more writes.
      */
     CH_TX_RESULT_COMMIT_UNCERTAIN = -6,
-    CH_TX_RESULT_NO_SPACE = -7
+    CH_TX_RESULT_NO_SPACE = -7,
+    CH_TX_RESULT_NO_MEMORY = -8
 
 } CH_TxResult;
 
@@ -71,6 +72,37 @@ typedef enum CH_TxResult
  * rewriting it.
  */
 CH_TxResult CH_TxInitialize(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size
+);
+
+
+/*
+ * Compact the current committed snapshot into the inactive format-v2 arena.
+ *
+ * Only the physically latest PUT for each exact scope + key is retained.
+ * Latest DELETE records are represented by omission from the compacted
+ * snapshot.
+ *
+ * Sequence:
+ *
+ *   1. recover the current authoritative arena
+ *   2. validate the complete current committed log
+ *   3. copy only current live PUT records into the inactive arena
+ *   4. sync and validate the staged compacted arena
+ *   5. publish one newer inactive superblock pointing at that arena
+ *   6. sync publication
+ *
+ * Before step 5 the old arena remains authoritative and untouched.
+ *
+ * CH_TX_RESULT_COMMIT_UNCERTAIN means publication of the new superblock
+ * began but its durable outcome is unknown; recover before another write.
+ *
+ * CH_TX_RESULT_NO_SPACE means the set of live objects itself cannot fit
+ * inside one arena.
+ */
+CH_TxResult CH_TxCompact(
     const CH_TxSectorBackend *backend,
     void *sector_buffer,
     size_t sector_buffer_size

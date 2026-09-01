@@ -1,5 +1,6 @@
 #include <carryhandle/ch_tx.h>
 
+#include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
 
@@ -1744,6 +1745,487 @@ CH_TxResult CH_TxAppendRecord(
     return
         CH_TX_RESULT_OK;
 }
+
+
+/* ------------------------------------------------------------------------- */
+/* Dual-arena compaction                                                     */
+/* ------------------------------------------------------------------------- */
+
+CH_TxResult CH_TxCompact(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size)
+{
+    CH_TxSuperblock authoritative;
+    CH_TxSuperblock published;
+
+    CH_TxArenaBounds activeArena;
+    CH_TxArenaBounds targetArena;
+
+    CH_TxLogCursor cursor;
+
+    CH_TxRecordHeader current;
+    CH_TxRecordHeader latest;
+    CH_TxRecordHeader staged;
+
+    CH_TxResult result;
+
+    uint32_t authoritativeSector;
+    uint32_t publishSector;
+
+    uint32_t activeArenaIndex;
+    uint32_t targetArenaIndex;
+
+    uint32_t currentSector;
+    uint32_t latestSector;
+
+    uint32_t destinationSector;
+    uint32_t validateSector;
+
+    uint32_t i;
+
+
+    if (
+        !CH_TxSectorBackendValid(backend) ||
+        !sector_buffer ||
+        sector_buffer_size <
+            backend->sector_size ||
+        !CH_TxSectorBufferValid(
+            backend,
+            sector_buffer)
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    result =
+        CH_TxReadAuthoritativeSuperblock(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &authoritative,
+            &authoritativeSector
+        );
+
+
+    if (result !=
+        CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+
+    if (!CH_TxArenaBoundsForLog(
+            backend->sector_count,
+            authoritative.log_start_sector,
+            authoritative.log_end_sector,
+            &activeArena,
+            &activeArenaIndex))
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    targetArenaIndex =
+        activeArenaIndex == 0u
+        ? 1u
+        : 0u;
+
+
+    if (!CH_TxArenaBoundsForIndex(
+            backend->sector_count,
+            targetArenaIndex,
+            &targetArena))
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    /*
+     * Keep the current superblock snapshot fixed for the complete staging
+     * operation. Nothing publishes into the target arena until the end.
+     */
+    cursor.generation =
+        authoritative.generation;
+
+    cursor.next_sector =
+        authoritative.log_start_sector;
+
+    cursor.end_sector =
+        authoritative.log_end_sector;
+
+
+    destinationSector =
+        targetArena.start_sector;
+
+
+    while (cursor.next_sector <
+           cursor.end_sector)
+    {
+        size_t identitySize;
+
+        unsigned char *identity;
+        unsigned char *scope;
+        unsigned char *key;
+
+
+        result =
+            CH_TxReadNextRecord(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                &cursor,
+                &currentSector,
+                &current
+            );
+
+
+        if (result !=
+            CH_TX_RESULT_OK)
+        {
+            return result;
+        }
+
+
+        if (
+            (uint64_t)current.scope_size +
+                (uint64_t)current.key_size >
+            (uint64_t)SIZE_MAX
+        )
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+
+        identitySize =
+            (size_t)current.scope_size +
+            (size_t)current.key_size;
+
+
+        /*
+         * Format validation requires a non-empty key, therefore this cannot
+         * be a zero-byte allocation for a valid record.
+         */
+        if (identitySize == 0u)
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+
+        identity =
+            malloc(
+                identitySize
+            );
+
+
+        if (!identity)
+        {
+            return
+                CH_TX_RESULT_NO_MEMORY;
+        }
+
+
+        scope =
+            identity;
+
+        key =
+            identity +
+            current.scope_size;
+
+
+        /*
+         * Read the exact logical identity bytes. The complete body is still
+         * CRC-validated even though the payload is not copied out.
+         */
+        result =
+            CH_TxReadRecord(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                authoritative.log_end_sector,
+                currentSector,
+                &current,
+                scope,
+                current.scope_size,
+                key,
+                current.key_size,
+                NULL,
+                0u
+            );
+
+
+        if (result !=
+            CH_TX_RESULT_OK)
+        {
+            free(
+                identity
+            );
+
+            return result;
+        }
+
+
+        /*
+         * FindLatestRecord validates the complete authoritative snapshot.
+         *
+         * This is deliberately simple rather than clever: GameCube Memory
+         * Card transaction logs are small, and compaction happens only when
+         * an arena fills. Correctness matters more than O(n^2) scan cost.
+         */
+        result =
+            CH_TxFindLatestRecord(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                scope,
+                current.scope_size,
+                key,
+                current.key_size,
+                &latestSector,
+                &latest
+            );
+
+
+        free(
+            identity
+        );
+
+
+        if (result !=
+            CH_TX_RESULT_OK)
+        {
+            return result;
+        }
+
+
+        /*
+         * Older versions of this object are obsolete.
+         */
+        if (latestSector !=
+            currentSector)
+        {
+            continue;
+        }
+
+
+        /*
+         * A latest tombstone means the object is absent. The compacted
+         * snapshot represents absence simply by not copying any record.
+         */
+        if (latest.operation ==
+            CH_TX_OPERATION_DELETE)
+        {
+            continue;
+        }
+
+
+        if (latest.operation !=
+            CH_TX_OPERATION_PUT)
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+
+        if (
+            current.record_sectors == 0u ||
+            current.record_sectors >
+                targetArena.end_sector -
+                destinationSector
+        )
+        {
+            return
+                CH_TX_RESULT_NO_SPACE;
+        }
+
+
+        /*
+         * Copy the already-validated encoded record byte-for-byte.
+         *
+         * Its payload codec, CRCs and exact scope/key identity therefore do
+         * not need to be decoded and rebuilt during compaction.
+         */
+        for (
+            i = 0u;
+            i < current.record_sectors;
+            ++i
+        )
+        {
+            if (!backend->read_sector(
+                    backend->context,
+                    currentSector + i,
+                    sector_buffer))
+            {
+                return
+                    CH_TX_RESULT_IO;
+            }
+
+
+            if (!backend->write_sector(
+                    backend->context,
+                    destinationSector + i,
+                    sector_buffer))
+            {
+                return
+                    CH_TX_RESULT_IO;
+            }
+        }
+
+
+        destinationSector +=
+            current.record_sectors;
+    }
+
+
+    /*
+     * Make the complete staged arena durable before validating or
+     * publishing it. Failure here is still pre-publication.
+     */
+    if (!backend->sync(
+            backend->context))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+
+    /*
+     * Validate the exact compacted record stream independently from the old
+     * authoritative arena.
+     */
+    validateSector =
+        targetArena.start_sector;
+
+
+    while (validateSector <
+           destinationSector)
+    {
+        result =
+            CH_TxReadRecord(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                destinationSector,
+                validateSector,
+                &staged,
+                NULL,
+                0u,
+                NULL,
+                0u,
+                NULL,
+                0u
+            );
+
+
+        if (result !=
+            CH_TX_RESULT_OK)
+        {
+            return result;
+        }
+
+
+        if (
+            staged.operation !=
+                CH_TX_OPERATION_PUT ||
+            staged.record_sectors == 0u ||
+            staged.record_sectors >
+                destinationSector -
+                validateSector
+        )
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+
+        validateSector +=
+            staged.record_sectors;
+    }
+
+
+    if (validateSector !=
+        destinationSector)
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    /*
+     * Publication is one normal A/B-superblock generation advance, except
+     * that log_start changes to the other data arena.
+     */
+    published =
+        authoritative;
+
+    published.generation =
+        authoritative.generation + 1u;
+
+    published.log_start_sector =
+        targetArena.start_sector;
+
+    published.log_end_sector =
+        destinationSector;
+
+
+    publishSector =
+        authoritativeSector ==
+            CH_TX_SUPERBLOCK_A_SECTOR
+        ? CH_TX_SUPERBLOCK_B_SECTOR
+        : CH_TX_SUPERBLOCK_A_SECTOR;
+
+
+    memset(
+        sector_buffer,
+        0,
+        backend->sector_size
+    );
+
+
+    if (!CH_TxEncodeSuperblock(
+            sector_buffer,
+            backend->sector_size,
+            &published))
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    /*
+     * Publication begins here.
+     *
+     * A failed write/sync may or may not have become durable, so preserve
+     * the existing COMMIT_UNCERTAIN contract.
+     */
+    if (!backend->write_sector(
+            backend->context,
+            publishSector,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_COMMIT_UNCERTAIN;
+    }
+
+
+    if (!backend->sync(
+            backend->context))
+    {
+        return
+            CH_TX_RESULT_COMMIT_UNCERTAIN;
+    }
+
+
+    return
+        CH_TX_RESULT_OK;
+}
+
 
 /* ------------------------------------------------------------------------- */
 /* Committed-log cursor                                                      */

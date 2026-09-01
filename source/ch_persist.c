@@ -44,6 +44,10 @@ static CH_PersistResult persistResultFromTx(
             return
                 CH_PERSIST_RESULT_NO_SPACE;
 
+        case CH_TX_RESULT_NO_MEMORY:
+            return
+                CH_PERSIST_RESULT_NO_MEMORY;
+
         case CH_TX_RESULT_END:
         default:
             /*
@@ -199,6 +203,69 @@ CH_PersistResult CH_PersistGet(
         CH_PERSIST_RESULT_OK;
 }
 
+
+/* ------------------------------------------------------------------------- */
+/* Append with transparent arena compaction                                  */
+/* ------------------------------------------------------------------------- */
+
+static CH_TxResult persistAppendWithCompaction(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const CH_TxAppendRequest *request)
+{
+    CH_TxResult result;
+
+
+    result =
+        CH_TxAppendRecord(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            request,
+            NULL
+        );
+
+
+    if (result !=
+        CH_TX_RESULT_NO_SPACE)
+    {
+        return result;
+    }
+
+
+    result =
+        CH_TxCompact(
+            backend,
+            sector_buffer,
+            sector_buffer_size
+        );
+
+
+    if (result !=
+        CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+
+    /*
+     * Retry exactly once.
+     *
+     * If the compacted live set plus this record still cannot fit in one
+     * arena, the second append correctly returns NO_SPACE.
+     */
+    return
+        CH_TxAppendRecord(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            request,
+            NULL
+        );
+}
+
+
 /* ------------------------------------------------------------------------- */
 /* Persistent object PUT                                                     */
 /* ------------------------------------------------------------------------- */
@@ -299,12 +366,11 @@ CH_PersistResult CH_PersistPut(
         CH_TX_CODEC_NONE;
 
     result =
-        CH_TxAppendRecord(
+        persistAppendWithCompaction(
             backend,
             sector_buffer,
             sector_buffer_size,
-            &request,
-            NULL
+            &request
         );
 
     return
@@ -361,12 +427,11 @@ CH_PersistResult CH_PersistDelete(
         CH_TX_CODEC_NONE;
 
     result =
-        CH_TxAppendRecord(
+        persistAppendWithCompaction(
             backend,
             sector_buffer,
             sector_buffer_size,
-            &request,
-            NULL
+            &request
         );
 
     return
