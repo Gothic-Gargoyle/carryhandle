@@ -74,6 +74,34 @@ s32 CH_MemCardCreate(
 );
 
 
+typedef struct CH_MemCardCapacity
+{
+    u32 memory_size_mbit;
+    u32 sector_size;
+
+    u32 physical_blocks;
+    u32 usable_blocks;
+    u32 used_blocks;
+    u32 free_blocks;
+
+    u32 file_count;
+    u32 free_file_slots;
+} CH_MemCardCapacity;
+
+
+/*
+ * Query physical capacity and currently available space.
+ *
+ * GameCube Memory Cards reserve five physical blocks for card
+ * administration. File usage is calculated across the complete
+ * directory, not only files belonging to the current application.
+ */
+s32 CH_MemCardGetCapacity(
+    const CH_MemCardSession *session,
+    CH_MemCardCapacity *capacity
+);
+
+
 /*
  * Read data from an opened Memory Card file.
  *

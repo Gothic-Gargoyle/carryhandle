@@ -268,3 +268,143 @@ s32 CH_MemCardWrite(
         offset
     );
 }
+
+
+s32 CH_MemCardGetCapacity(
+    const CH_MemCardSession *session,
+    CH_MemCardCapacity *capacity
+)
+{
+    enum
+    {
+        CH_MEMCARD_SYSTEM_BLOCKS = 5
+    };
+
+    card_dir entries[CARD_MAXFILES];
+
+    u16 physicalBlocks = 0;
+    s32 fileCount = 0;
+    s32 result;
+    s32 i;
+
+    u32 usedBlocks = 0;
+    u32 usableBlocks;
+
+    if (!session || !capacity)
+    {
+        return CH_MEMCARD_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (!session->mounted)
+    {
+        return CH_MEMCARD_ERROR_NOT_MOUNTED;
+    }
+
+    if (
+        session->memory_size < 0
+        || session->sector_size <= 0
+    )
+    {
+        return CARD_ERROR_BROKEN;
+    }
+
+    memset(
+        capacity,
+        0,
+        sizeof(*capacity)
+    );
+
+    result =
+        CARD_GetBlockCount(
+            session->slot,
+            &physicalBlocks
+        );
+
+    if (result != CARD_ERROR_READY)
+    {
+        return result;
+    }
+
+    if (
+        physicalBlocks
+        < CH_MEMCARD_SYSTEM_BLOCKS
+    )
+    {
+        return CARD_ERROR_BROKEN;
+    }
+
+    result =
+        CARD_GetDirectory(
+            session->slot,
+            entries,
+            &fileCount,
+            true
+        );
+
+    if (result != CARD_ERROR_READY)
+    {
+        return result;
+    }
+
+    if (
+        fileCount < 0
+        || fileCount > CARD_MAXFILES
+    )
+    {
+        return CARD_ERROR_BROKEN;
+    }
+
+    for (i = 0; i < fileCount; ++i)
+    {
+        u32 blocks =
+            entries[i].filelen
+            / (u32)session->sector_size;
+
+        if (
+            (
+                entries[i].filelen
+                % (u32)session->sector_size
+            ) != 0u
+        )
+        {
+            ++blocks;
+        }
+
+        usedBlocks += blocks;
+    }
+
+    usableBlocks =
+        (u32)physicalBlocks
+        - CH_MEMCARD_SYSTEM_BLOCKS;
+
+    if (usedBlocks > usableBlocks)
+    {
+        return CARD_ERROR_BROKEN;
+    }
+
+    capacity->memory_size_mbit =
+        (u32)session->memory_size;
+
+    capacity->sector_size =
+        (u32)session->sector_size;
+
+    capacity->physical_blocks =
+        (u32)physicalBlocks;
+
+    capacity->usable_blocks =
+        usableBlocks;
+
+    capacity->used_blocks =
+        usedBlocks;
+
+    capacity->free_blocks =
+        usableBlocks - usedBlocks;
+
+    capacity->file_count =
+        (u32)fileCount;
+
+    capacity->free_file_slots =
+        CARD_MAXFILES - (u32)fileCount;
+
+    return CARD_ERROR_READY;
+}
