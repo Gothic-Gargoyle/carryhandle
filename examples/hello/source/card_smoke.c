@@ -1,5 +1,6 @@
 #include "card_smoke.h"
 #include "tx_backend_smoke.h"
+#include "persist_store_smoke.h"
 
 #include <carryhandle/carryhandle.h>
 
@@ -48,6 +49,7 @@ bool HelloCardSmokeTest(void)
     bool created = false;
     bool presentationOk = false;
     bool backendOk = false;
+    bool persistOk = false;
 
     app = CH_ApplicationGetInfo();
 
@@ -272,6 +274,21 @@ bool HelloCardSmokeTest(void)
     );
 
 
+    persistOk =
+        HelloPersistStoreSmokeTest(
+            &session,
+            sectorBuffer,
+            (u32)sectorSize
+        );
+
+    printf(
+        "Persistent    : %s\n",
+        persistOk
+            ? "PASS"
+            : "FAIL"
+    );
+
+
 cleanup:
 
     if (fileOpen)
@@ -326,5 +343,5 @@ cleanup:
         "CARD cleanup  : PASS\n"
     );
 
-    return presentationOk && backendOk;
+    return presentationOk && backendOk && persistOk;
 }

@@ -40,6 +40,43 @@ typedef enum CH_TxResult
 
 
 /*
+ * Initialize a new transaction container on a blank backend.
+ *
+ * Format-v1 layout:
+ *
+ *   sector 0 : CHTX container metadata
+ *   sector 1 : superblock A
+ *   sector 2 : superblock B
+ *   sector 3+: transaction log
+ *
+ * Initialization publication sequence:
+ *
+ *   1. write equivalent generation-0 A/B superblocks
+ *   2. sync staged superblocks
+ *   3. preserve sector-0 bytes outside the encoded container header
+ *   4. write CHTX metadata to sector 0
+ *   5. sync publication
+ *
+ * Before sector-0 publication, staged superblocks are not a valid store.
+ *
+ * A staging failure returns CH_TX_RESULT_IO.
+ *
+ * Once sector-0 publication begins, a write or sync failure returns
+ * CH_TX_RESULT_COMMIT_UNCERTAIN. Recover transaction state before another
+ * write.
+ *
+ * Calling this on an already-valid initialized container is idempotent:
+ * the existing authoritative state is validated and OK is returned without
+ * rewriting it.
+ */
+CH_TxResult CH_TxInitialize(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size
+);
+
+
+/*
  * Cursor over the records visible in one recovered committed state.
  *
  * Opening a cursor snapshots the authoritative log_end. Records appended
@@ -295,7 +332,11 @@ CH_TxResult CH_TxReadRecord(
 
 
 /*
- * Read both A/B superblocks and select the authoritative committed state.
+ * Validate sector-0 container metadata, then read both A/B superblocks and
+ * select the authoritative committed state.
+ *
+ * An invalid or geometry-mismatched container header is CORRUPT. A metadata
+ * sector read failure is IO.
  *
  * Rules:
  *

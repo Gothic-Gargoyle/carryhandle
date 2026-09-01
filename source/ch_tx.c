@@ -106,6 +106,20 @@ static bool readSuperblock(
 }
 
 
+static bool containerGeometryMatches(
+    const CH_TxSectorBackend *backend,
+    const CH_TxContainerHeader *container)
+{
+    return
+        backend &&
+        container &&
+        container->sector_size ==
+            backend->sector_size &&
+        container->container_sectors ==
+            backend->sector_count;
+}
+
+
 CH_TxResult CH_TxReadAuthoritativeSuperblock(
     const CH_TxSectorBackend *backend,
     void *sector_buffer,
@@ -113,6 +127,8 @@ CH_TxResult CH_TxReadAuthoritativeSuperblock(
     CH_TxSuperblock *superblock,
     uint32_t *superblock_sector)
 {
+    CH_TxContainerHeader container;
+
     CH_TxSuperblock a;
     CH_TxSuperblock b;
 
@@ -137,6 +153,36 @@ CH_TxResult CH_TxReadAuthoritativeSuperblock(
         return
             CH_TX_RESULT_INVALID_ARGUMENT;
     }
+
+    /*
+     * Sector 0 is the container publication marker.
+     *
+     * Valid superblocks without a valid container header are staged or
+     * incomplete initialization state and must never become authoritative.
+     */
+    if (!backend->read_sector(
+            backend->context,
+            CH_TX_METADATA_SECTOR,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+    if (
+        !CH_TxDecodeContainerHeader(
+            &container,
+            sector_buffer,
+            backend->sector_size) ||
+        !containerGeometryMatches(
+            backend,
+            &container)
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
 
     if (!readSuperblock(
             backend,
@@ -260,6 +306,227 @@ CH_TxResult CH_TxReadAuthoritativeSuperblock(
     return
         CH_TX_RESULT_OK;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Transaction container initialization                                      */
+/* ------------------------------------------------------------------------- */
+
+CH_TxResult CH_TxInitialize(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size)
+{
+    CH_TxContainerHeader container = {0};
+    CH_TxSuperblock superblock = {0};
+
+    if (
+        !CH_TxSectorBackendValid(backend) ||
+        !sector_buffer ||
+        sector_buffer_size <
+            backend->sector_size ||
+        !CH_TxSectorBufferValid(
+            backend,
+            sector_buffer) ||
+        backend->sector_size <
+            CH_TX_RECORD_HEADER_ENCODED_SIZE ||
+        backend->sector_count <=
+            CH_TX_SUPERBLOCK_B_SECTOR
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    /*
+     * First inspect sector 0.
+     *
+     * If it is already a valid format-v1 container for this backend,
+     * initialization is idempotent: validate the authoritative state and
+     * return without writing anything.
+     */
+    if (!backend->read_sector(
+            backend->context,
+            CH_TX_METADATA_SECTOR,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+    if (CH_TxDecodeContainerHeader(
+            &container,
+            sector_buffer,
+            backend->sector_size))
+    {
+        if (!containerGeometryMatches(
+                backend,
+                &container))
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+        return
+            CH_TxReadAuthoritativeSuperblock(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                &superblock,
+                NULL
+            );
+    }
+
+
+    /*
+     * Stage two equivalent empty superblocks.
+     *
+     * Sector 0 is still invalid at this point, so even physically durable
+     * A/B writes cannot make a half-initialized store visible.
+     */
+    superblock.generation =
+        0u;
+
+    superblock.sector_size =
+        backend->sector_size;
+
+    superblock.container_sectors =
+        backend->sector_count;
+
+    superblock.log_start_sector =
+        CH_TX_DATA_START_SECTOR;
+
+    superblock.log_end_sector =
+        CH_TX_DATA_START_SECTOR;
+
+    superblock.flags =
+        0u;
+
+
+    memset(
+        sector_buffer,
+        0,
+        backend->sector_size
+    );
+
+    if (!CH_TxEncodeSuperblock(
+            sector_buffer,
+            backend->sector_size,
+            &superblock))
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    if (!backend->write_sector(
+            backend->context,
+            CH_TX_SUPERBLOCK_A_SECTOR,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+
+    if (!backend->write_sector(
+            backend->context,
+            CH_TX_SUPERBLOCK_B_SECTOR,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+
+    if (!backend->sync(
+            backend->context))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+
+    /*
+     * Reload sector 0 after staging so bytes outside the transaction
+     * container header are preserved. This is important for callers that
+     * store CARD presentation or other application metadata in the same
+     * physical sector.
+     */
+    if (!backend->read_sector(
+            backend->context,
+            CH_TX_METADATA_SECTOR,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_IO;
+    }
+
+
+    memset(
+        &container,
+        0,
+        sizeof(container)
+    );
+
+    container.sector_size =
+        backend->sector_size;
+
+    container.container_sectors =
+        backend->sector_count;
+
+    /*
+     * Format-v1 single-backend containers use physical replica A.
+     */
+    container.replica_index =
+        0u;
+
+    container.flags =
+        0u;
+
+
+    /*
+     * CH_TxEncodeContainerHeader() touches only the encoded 32-byte header.
+     * The remainder of sector 0 stays caller-owned.
+     */
+    if (!CH_TxEncodeContainerHeader(
+            sector_buffer,
+            backend->sector_size,
+            &container))
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    /*
+     * Publication begins here.
+     *
+     * From this point onward a generic backend cannot know whether a failed
+     * write or durability barrier became persistent.
+     */
+    if (!backend->write_sector(
+            backend->context,
+            CH_TX_METADATA_SECTOR,
+            sector_buffer))
+    {
+        return
+            CH_TX_RESULT_COMMIT_UNCERTAIN;
+    }
+
+
+    if (!backend->sync(
+            backend->context))
+    {
+        return
+            CH_TX_RESULT_COMMIT_UNCERTAIN;
+    }
+
+
+    return
+        CH_TX_RESULT_OK;
+}
+
 
 /* ------------------------------------------------------------------------- */
 /* Committed record reader                                                   */
