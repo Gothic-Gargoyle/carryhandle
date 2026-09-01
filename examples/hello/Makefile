@@ -38,15 +38,16 @@ GENERATED_CARD_STAMP  := $(PROJECT_DIR)/$(BUILD)/.ch_card_presentation.stamp
 SOURCES  := $(PROJECT_DIR)/source \
             $(CARRY_ROOT)/source
 
-INCLUDES := $(CARRY_ROOT)/include
+INCLUDES := $(CARRY_ROOT)/include \
+            $(PORTLIBS_PATH)/ppc/include
 
 CFLAGS   := -g -O2 -Wall -Wextra $(MACHDEP) $(INCLUDE)
 CXXFLAGS := $(CFLAGS)
 
 LDFLAGS  := -g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-LIBS     := -logc -lm
-LIBDIRS  :=
+LIBS     := -lz -logc -lm
+LIBDIRS  := $(PORTLIBS_PATH)/ppc
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 

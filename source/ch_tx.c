@@ -1,6 +1,7 @@
 #include <carryhandle/ch_tx.h>
 
 #include <string.h>
+#include <zlib.h>
 
 
 static bool superblockGeometryMatches(
@@ -1989,4 +1990,595 @@ CH_TxResult CH_TxFindLatestRecord(
 
     return
         CH_TX_RESULT_OK;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Raw committed PUT payload                                                 */
+/* ------------------------------------------------------------------------- */
+
+static uint32_t rawPayloadCrc32(
+    const void *data,
+    size_t size)
+{
+    uint32_t crc =
+        0xffffffffu;
+
+    if (size != 0u)
+    {
+        crc =
+            bodyCrcUpdate(
+                crc,
+                (const uint8_t *)data,
+                size
+            );
+    }
+
+    return
+        crc ^ 0xffffffffu;
+}
+
+
+static CH_TxResult readZlibRawPayload(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    uint32_t read_limit_sector,
+    uint32_t record_sector,
+    const CH_TxRecordHeader *record,
+    void *raw_output)
+{
+    z_stream stream;
+
+    CH_TxRecordHeader reread;
+
+    uint8_t inflateBuffer[1024];
+
+    uint8_t *sectorBytes =
+        (uint8_t *)sector_buffer;
+
+    uint8_t *rawBytes =
+        (uint8_t *)raw_output;
+
+    size_t payloadStart;
+    size_t payloadEnd;
+
+    size_t bodyStart;
+    size_t dataOffset;
+    size_t available;
+    size_t bodyEnd;
+
+    size_t inputStart;
+    size_t inputEnd;
+    size_t inputAmount;
+
+    size_t produced;
+    size_t rawWritten =
+        0u;
+
+    size_t storedSeen =
+        0u;
+
+    uint32_t rawCrc =
+        0xffffffffu;
+
+    uint32_t sectorIndex;
+
+    int zResult;
+
+    bool streamEnded =
+        false;
+
+
+    if (
+        (size_t)record->scope_size +
+            (size_t)record->key_size <
+        (size_t)record->scope_size
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    payloadStart =
+        (size_t)record->scope_size +
+        (size_t)record->key_size;
+
+    if (
+        payloadStart +
+            (size_t)record->stored_size <
+        payloadStart
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+    payloadEnd =
+        payloadStart +
+        (size_t)record->stored_size;
+
+
+    memset(
+        &stream,
+        0,
+        sizeof(stream)
+    );
+
+    zResult =
+        inflateInit(
+            &stream
+        );
+
+    if (zResult != Z_OK)
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    for (
+        sectorIndex = 0u;
+        sectorIndex <
+            record->record_sectors;
+        ++sectorIndex
+    )
+    {
+        if (!backend->read_sector(
+                backend->context,
+                record_sector +
+                    sectorIndex,
+                sector_buffer))
+        {
+            inflateEnd(
+                &stream
+            );
+
+            return
+                CH_TX_RESULT_IO;
+        }
+
+
+        if (sectorIndex == 0u)
+        {
+            if (!CH_TxDecodeRecordHeader(
+                    &reread,
+                    sectorBytes,
+                    backend->sector_size))
+            {
+                inflateEnd(
+                    &stream
+                );
+
+                return
+                    CH_TX_RESULT_CORRUPT;
+            }
+
+            /*
+             * The first pass already validated this committed record.
+             * Do not decode payload bytes from a record whose metadata
+             * changed between passes.
+             */
+            if (!recordIdentityHeaderMatches(
+                    &reread,
+                    record))
+            {
+                inflateEnd(
+                    &stream
+                );
+
+                return
+                    CH_TX_RESULT_CORRUPT;
+            }
+        }
+
+
+        if (sectorIndex == 0u)
+        {
+            bodyStart =
+                0u;
+
+            dataOffset =
+                CH_TX_RECORD_HEADER_ENCODED_SIZE;
+
+            available =
+                (size_t)backend->sector_size -
+                dataOffset;
+        }
+        else
+        {
+            bodyStart =
+                ((size_t)backend->sector_size -
+                    CH_TX_RECORD_HEADER_ENCODED_SIZE) +
+                ((size_t)sectorIndex - 1u) *
+                    (size_t)backend->sector_size;
+
+            dataOffset =
+                0u;
+
+            available =
+                backend->sector_size;
+        }
+
+        bodyEnd =
+            bodyStart +
+            available;
+
+
+        inputStart =
+            bodyStart > payloadStart
+            ? bodyStart
+            : payloadStart;
+
+        inputEnd =
+            bodyEnd < payloadEnd
+            ? bodyEnd
+            : payloadEnd;
+
+
+        if (inputStart >= inputEnd)
+        {
+            continue;
+        }
+
+
+        if (streamEnded)
+        {
+            inflateEnd(
+                &stream
+            );
+
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+
+        inputAmount =
+            inputEnd -
+            inputStart;
+
+        storedSeen +=
+            inputAmount;
+
+
+        stream.next_in =
+            (Bytef *)(
+                sectorBytes +
+                dataOffset +
+                (inputStart - bodyStart)
+            );
+
+        stream.avail_in =
+            (uInt)inputAmount;
+
+
+        while (
+            stream.avail_in != 0u &&
+            !streamEnded
+        )
+        {
+            uInt inputBefore =
+                stream.avail_in;
+
+            stream.next_out =
+                inflateBuffer;
+
+            stream.avail_out =
+                (uInt)sizeof(inflateBuffer);
+
+
+            zResult =
+                inflate(
+                    &stream,
+                    Z_NO_FLUSH
+                );
+
+
+            produced =
+                sizeof(inflateBuffer) -
+                stream.avail_out;
+
+
+            if (produced != 0u)
+            {
+                if (
+                    rawWritten >
+                        record->raw_size ||
+                    produced >
+                        (size_t)record->raw_size -
+                        rawWritten
+                )
+                {
+                    inflateEnd(
+                        &stream
+                    );
+
+                    return
+                        CH_TX_RESULT_CORRUPT;
+                }
+
+                if (rawBytes)
+                {
+                    memcpy(
+                        rawBytes +
+                            rawWritten,
+                        inflateBuffer,
+                        produced
+                    );
+                }
+
+                rawCrc =
+                    bodyCrcUpdate(
+                        rawCrc,
+                        inflateBuffer,
+                        produced
+                    );
+
+                rawWritten +=
+                    produced;
+            }
+
+
+            if (zResult == Z_STREAM_END)
+            {
+                streamEnded =
+                    true;
+
+                /*
+                 * Format-v1 stored_size is exactly one zlib stream.
+                 * Bytes remaining after the end marker are not accepted.
+                 */
+                if (stream.avail_in != 0u)
+                {
+                    inflateEnd(
+                        &stream
+                    );
+
+                    return
+                        CH_TX_RESULT_CORRUPT;
+                }
+
+                break;
+            }
+
+
+            if (zResult != Z_OK)
+            {
+                inflateEnd(
+                    &stream
+                );
+
+                return
+                    CH_TX_RESULT_CORRUPT;
+            }
+
+
+            /*
+             * Defensive no-progress guard for malformed input.
+             */
+            if (
+                stream.avail_in ==
+                    inputBefore &&
+                produced == 0u
+            )
+            {
+                inflateEnd(
+                    &stream
+                );
+
+                return
+                    CH_TX_RESULT_CORRUPT;
+            }
+        }
+    }
+
+
+    inflateEnd(
+        &stream
+    );
+
+
+    if (
+        storedSeen !=
+            record->stored_size ||
+        !streamEnded ||
+        rawWritten !=
+            record->raw_size
+    )
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    rawCrc ^=
+        0xffffffffu;
+
+    if (rawCrc !=
+        record->raw_crc32)
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    (void)read_limit_sector;
+
+    return
+        CH_TX_RESULT_OK;
+}
+
+
+CH_TxResult CH_TxReadRawPayload(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    uint32_t record_sector,
+    const CH_TxRecordHeader *record,
+    void *raw_output,
+    size_t raw_capacity)
+{
+    CH_TxSuperblock authoritative;
+
+    CH_TxRecordHeader current;
+    CH_TxRecordHeader reread;
+
+    CH_TxResult result;
+
+    uint32_t authoritativeSector;
+
+
+    if (
+        !record ||
+        record->operation !=
+            CH_TX_OPERATION_PUT ||
+        (
+            record->raw_size != 0u &&
+            !raw_output
+        )
+    )
+    {
+        return
+            CH_TX_RESULT_INVALID_ARGUMENT;
+    }
+
+
+    result =
+        CH_TxReadAuthoritativeSuperblock(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &authoritative,
+            &authoritativeSector
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+    (void)authoritativeSector;
+
+
+    /*
+     * Revalidate that the supplied record is still inside the current
+     * committed log and that the on-media metadata still matches.
+     */
+    result =
+        CH_TxReadRecord(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            authoritative.log_end_sector,
+            record_sector,
+            &current,
+            NULL,
+            0u,
+            NULL,
+            0u,
+            NULL,
+            0u
+        );
+
+    if (result != CH_TX_RESULT_OK)
+    {
+        return result;
+    }
+
+
+    if (!recordIdentityHeaderMatches(
+            &current,
+            record))
+    {
+        return
+            CH_TX_RESULT_CORRUPT;
+    }
+
+
+    if (raw_capacity <
+        current.raw_size)
+    {
+        return
+            CH_TX_RESULT_BUFFER_TOO_SMALL;
+    }
+
+
+    if (current.codec ==
+        CH_TX_CODEC_NONE)
+    {
+        /*
+         * For NONE, format validation guarantees:
+         *
+         *   raw_size == stored_size
+         *
+         * ReadRecord() performs the second complete body validation
+         * while copying the stored/raw bytes.
+         */
+        result =
+            CH_TxReadRecord(
+                backend,
+                sector_buffer,
+                sector_buffer_size,
+                authoritative.log_end_sector,
+                record_sector,
+                &reread,
+                NULL,
+                0u,
+                NULL,
+                0u,
+                raw_output,
+                raw_capacity
+            );
+
+        if (result != CH_TX_RESULT_OK)
+        {
+            return result;
+        }
+
+
+        if (!recordIdentityHeaderMatches(
+                &reread,
+                &current))
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+
+        if (
+            rawPayloadCrc32(
+                raw_output,
+                current.raw_size
+            ) != current.raw_crc32
+        )
+        {
+            return
+                CH_TX_RESULT_CORRUPT;
+        }
+
+
+        return
+            CH_TX_RESULT_OK;
+    }
+
+
+    if (current.codec ==
+        CH_TX_CODEC_ZLIB)
+    {
+        return
+            readZlibRawPayload(
+                backend,
+                sector_buffer,
+                authoritative.log_end_sector,
+                record_sector,
+                &current,
+                raw_output
+            );
+    }
+
+
+    /*
+     * DecodeRecordHeader() should already have rejected codecs unknown
+     * to format v1. Keep this defensive boundary anyway.
+     */
+    return
+        CH_TX_RESULT_CORRUPT;
 }

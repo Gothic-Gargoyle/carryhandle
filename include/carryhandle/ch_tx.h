@@ -134,6 +134,44 @@ CH_TxResult CH_TxFindLatestRecord(
 
 
 /*
+ * Decode and verify the original raw payload of a committed PUT record.
+ *
+ * record_sector + record should come from a committed transaction read
+ * operation such as CH_TxFindLatestRecord(). The record is reread against
+ * the current authoritative committed log and must still match exactly.
+ *
+ * Supported format-v1 codecs:
+ *
+ *   CH_TX_CODEC_NONE
+ *   CH_TX_CODEC_ZLIB
+ *
+ * The decoded byte count must equal record->raw_size and the decoded bytes
+ * must match record->raw_crc32.
+ *
+ * DELETE records do not contain object payloads and are rejected with
+ * CH_TX_RESULT_INVALID_ARGUMENT.
+ *
+ * raw_output may be NULL only when raw_size is zero.
+ *
+ * If raw_capacity is smaller than raw_size,
+ * CH_TX_RESULT_BUFFER_TOO_SMALL is returned before payload decoding.
+ *
+ * IMPORTANT:
+ *   raw_output contents are valid only on CH_TX_RESULT_OK.
+ *   On any other result the buffer must be treated as unspecified.
+ */
+CH_TxResult CH_TxReadRawPayload(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    uint32_t record_sector,
+    const CH_TxRecordHeader *record,
+    void *raw_output,
+    size_t raw_capacity
+);
+
+
+/*
  * One record to append transactionally.
  *
  * CarryHandle owns:
