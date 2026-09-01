@@ -351,7 +351,7 @@ CH_TxResult CH_TxInitialize(
     /*
      * First inspect sector 0.
      *
-     * If it is already a valid format-v1 container for this backend,
+     * If it is already a valid format-v2 container for this backend,
      * initialization is idempotent: validate the authoritative state and
      * return without writing anything.
      */
@@ -499,9 +499,9 @@ CH_TxResult CH_TxInitialize(
         backend->sector_count;
 
     /*
-     * Format-v1 single-backend containers use physical replica A.
+     * Format v2 reserves this encoded word for future expansion.
      */
-    container.replica_index =
+    container.reserved0 =
         0u;
 
     container.flags =
@@ -1408,7 +1408,7 @@ CH_TxResult CH_TxPublishSuperblock(
     }
 
     /*
-     * Transaction format v1 reserves:
+     * Transaction format v2 reserves:
      *
      *   sector 1 = superblock A
      *   sector 2 = superblock B
@@ -3144,7 +3144,7 @@ static CH_TxResult readZlibRawPayload(
                     true;
 
                 /*
-                 * Format-v1 stored_size is exactly one zlib stream.
+                 * Format-v2 stored_size is exactly one zlib stream.
                  * Bytes remaining after the end marker are not accepted.
                  */
                 if (stream.avail_in != 0u)
@@ -3398,7 +3398,7 @@ CH_TxResult CH_TxReadRawPayload(
 
     /*
      * DecodeRecordHeader() should already have rejected codecs unknown
-     * to format v1. Keep this defensive boundary anyway.
+     * to format v2. Keep this defensive boundary anyway.
      */
     return
         CH_TX_RESULT_CORRUPT;

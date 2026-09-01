@@ -100,7 +100,7 @@ enum
     CONTAINER_HEADER_SIZE_OFFSET = 8,
     CONTAINER_SECTOR_SIZE_OFFSET = 12,
     CONTAINER_SECTORS_OFFSET = 16,
-    CONTAINER_REPLICA_INDEX_OFFSET = 20,
+    CONTAINER_RESERVED0_OFFSET = 20,
     CONTAINER_FLAGS_OFFSET = 24,
     CONTAINER_CRC_OFFSET = 28
 };
@@ -120,7 +120,7 @@ static bool validContainerHeader(
         ) &&
         header->container_sectors >=
             CH_TX_DATA_START_SECTOR &&
-        header->replica_index <= 1u;
+        header->reserved0 == 0u;
 }
 
 
@@ -179,8 +179,8 @@ bool CH_TxEncodeContainerHeader(
 
     putU32(
         buffer,
-        CONTAINER_REPLICA_INDEX_OFFSET,
-        header->replica_index
+        CONTAINER_RESERVED0_OFFSET,
+        header->reserved0
     );
 
     putU32(
@@ -280,10 +280,10 @@ bool CH_TxDecodeContainerHeader(
             CONTAINER_SECTORS_OFFSET
         );
 
-    decoded.replica_index =
+    decoded.reserved0 =
         getU32(
             buffer,
-            CONTAINER_REPLICA_INDEX_OFFSET
+            CONTAINER_RESERVED0_OFFSET
         );
 
     decoded.flags =

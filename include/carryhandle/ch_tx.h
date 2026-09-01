@@ -44,7 +44,7 @@ typedef enum CH_TxResult
 /*
  * Initialize a new transaction container on a blank backend.
  *
- * Format-v1 layout:
+ * Format-v2 layout:
  *
  *   sector 0 : CHTX container metadata
  *   sector 1 : superblock A
@@ -210,7 +210,7 @@ CH_TxResult CH_TxFindLatestRecord(
  * operation such as CH_TxFindLatestRecord(). The record is reread against
  * the current authoritative committed log and must still match exactly.
  *
- * Supported format-v1 codecs:
+ * Supported format-v2 codecs:
  *
  *   CH_TX_CODEC_NONE
  *   CH_TX_CODEC_ZLIB

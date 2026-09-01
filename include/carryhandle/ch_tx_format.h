@@ -191,10 +191,9 @@ typedef enum CH_TxCodec
 /*
  * Logical contents of sector 0.
  *
- * replica_index identifies the physical A/B container:
- *
- *   0 -> replica A
- *   1 -> replica B
+ * reserved0 is reserved expansion space in format v2 and must be zero.
+ * Keeping the encoded word reserved preserves the fixed 32-byte header
+ * without exposing the abandoned physical-replica prototype.
  */
 typedef struct CH_TxContainerHeader
 {
@@ -205,7 +204,7 @@ typedef struct CH_TxContainerHeader
     uint32_t sector_size;
 
     uint32_t container_sectors;
-    uint32_t replica_index;
+    uint32_t reserved0;
 
     uint32_t flags;
     uint32_t header_crc32;
