@@ -239,3 +239,32 @@ s32 CH_MemCardRead(
         offset
     );
 }
+
+
+s32 CH_MemCardWrite(
+    card_file *file,
+    const void *buffer,
+    u32 len,
+    u32 offset
+)
+{
+    if (
+        !file
+        || !buffer
+        || len == 0u
+        || (
+            (uintptr_t)buffer
+            & 31u
+        ) != 0u
+    )
+    {
+        return CH_MEMCARD_ERROR_INVALID_ARGUMENT;
+    }
+
+    return CARD_Write(
+        file,
+        buffer,
+        len,
+        offset
+    );
+}

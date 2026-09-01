@@ -91,6 +91,22 @@ s32 CH_MemCardRead(
 
 
 /*
+ * Write data to an opened Memory Card file.
+ *
+ * buffer must be 32-byte aligned.
+ *
+ * Returns CARD_ERROR_READY on success, an underlying CARD_* error,
+ * or CH_MEMCARD_ERROR_INVALID_ARGUMENT.
+ */
+s32 CH_MemCardWrite(
+    card_file *file,
+    const void *buffer,
+    u32 len,
+    u32 offset
+);
+
+
+/*
  * Close an opened Memory Card file.
  *
  * Returns CARD_ERROR_READY on success or the underlying CARD_* error.
