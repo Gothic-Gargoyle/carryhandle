@@ -238,7 +238,7 @@ cleanup:
     if (fileOpen)
     {
         closeResult =
-            CARD_Close(
+            CH_MemCardClose(
                 &file
             );
 
