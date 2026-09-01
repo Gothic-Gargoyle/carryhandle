@@ -111,7 +111,10 @@ def emit_source(
  * Do not hand-edit.
  */
 
+#include <carryhandle/ch_application_save.h>
+
 #include "{header_name}"
+
 
 const unsigned char
     ch_card_presentation_data[
@@ -120,6 +123,27 @@ const unsigned char
 {{
 {body}
 }};
+
+
+static const CH_ApplicationSaveDescriptor
+    applicationSaveDescriptor =
+{{
+    CH_CARD_PRESENTATION_FILENAME,
+    CH_CARD_FILE_SECTORS,
+
+    CH_APPLICATION_SAVE_PRESENTATION_OFFSET,
+
+    ch_card_presentation_data,
+    CH_CARD_PRESENTATION_DATA_SIZE
+}};
+
+
+const CH_ApplicationSaveDescriptor *
+CH_ApplicationSaveGetDescriptor(void)
+{{
+    return
+        &applicationSaveDescriptor;
+}}
 """
 
 

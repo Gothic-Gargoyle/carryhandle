@@ -2,25 +2,9 @@
 
 #include <carryhandle/carryhandle.h>
 
-#include "ch_card_presentation_data.h"
-
-#include <malloc.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-
-/*
- * Sector-zero application layout:
- *
- *   0..31   CarryHandle CHTX container header
- *   32..63  reserved/caller-owned
- *   64..    GameCube CARD presentation
- *
- * Transaction superblocks live in sectors 1/2 and records begin at
- * CH_TX_DATA_START_SECTOR.
- */
-#define HELLO_CARD_PRESENTATION_OFFSET 64u
 
 
 static const uint8_t helloPersistKey[] =
@@ -35,336 +19,170 @@ static const uint8_t helloPersistPayload[] =
 };
 
 
-static unsigned char cardWorkArea[CARD_WORKAREA]
-    __attribute__((aligned(32)));
+static void printOpenFailure(
+    const char *label,
+    CH_ApplicationSaveResult result,
+    const CH_ApplicationSaveSession *session)
+{
+    printf(
+        "%-14s: FAIL (%d)\n",
+        label,
+        (int)result
+    );
+
+    printf(
+        "  CARD result : %ld\n",
+        (long)session->card_result
+    );
+
+    printf(
+        "  TX result   : %d\n",
+        (int)session->tx_result
+    );
+}
 
 
 bool HelloCardSmokeTest(void)
 {
-    const CH_ApplicationInfo *app;
+    const CH_ApplicationInfo *application;
+    const CH_ApplicationSaveDescriptor *descriptor;
 
-    CH_MemCardSession session;
+    CH_ApplicationSaveSession save = {0};
 
-    CH_TxMemCardBackendContext txContext;
-    CH_TxSectorBackend txBackend;
+    const CH_TxSectorBackend *backend;
 
-    card_file file;
-    card_stat status;
+    void *sectorBuffer;
 
-    void *sectorBuffer = NULL;
-
-    uint8_t output[sizeof(helloPersistPayload)];
-
+    size_t sectorBufferSize;
     size_t objectSize = 0u;
 
-    u32 fileSize = 0u;
-    u32 existingSectors = 0u;
+    uint8_t output[
+        sizeof(helloPersistPayload)
+    ];
 
-    s32 result;
-    s32 memorySize = 0;
-    s32 sectorSize = 0;
+    CH_ApplicationSaveResult saveResult;
+    CH_ApplicationSaveResult closeResult;
 
-    s32 closeResult = CARD_ERROR_READY;
-    s32 unmountResult = CARD_ERROR_READY;
-
-    bool mounted = false;
-    bool fileOpen = false;
-    bool created = false;
-
-    bool storeOk = false;
-    bool presentationOk = false;
+    bool created;
     bool persistOk = false;
+    bool cleanupOk = true;
 
 
-    app =
+    application =
         CH_ApplicationGetInfo();
 
-
-    memset(
-        &session,
-        0,
-        sizeof(session)
-    );
-
-
-    if (!CH_MemCardMount(
-            &session,
-            CARD_SLOTA,
-            app->game_code,
-            app->company_code,
-            cardWorkArea))
-    {
-        printf("CARD A mount  : FAIL\n");
-        return false;
-    }
-
-    mounted = true;
-
-    memorySize =
-        session.memory_size;
-
-    sectorSize =
-        session.sector_size;
-
-
-    printf(
-        "CARD A        : %ld Mbit / %ld byte sector\n",
-        (long)memorySize,
-        (long)sectorSize
-    );
+    descriptor =
+        CH_ApplicationSaveGetDescriptor();
 
 
     if (
-        sectorSize <= 0 ||
-        CH_CARD_FILE_SECTORS <=
-            CH_TX_SUPERBLOCK_B_SECTOR ||
-        (u32)sectorSize >
-            UINT32_MAX / CH_CARD_FILE_SECTORS ||
-        (u32)sectorSize <
-            HELLO_CARD_PRESENTATION_OFFSET +
-            CH_CARD_PRESENTATION_DATA_SIZE
+        !application ||
+        !descriptor
     )
     {
-        printf("CARD geometry : manifest invalid\n");
-        goto cleanup;
+        printf("App save      : descriptor FAIL\n");
+        return false;
     }
-
-
-    fileSize =
-        (u32)sectorSize *
-        CH_CARD_FILE_SECTORS;
-
-
-    sectorBuffer =
-        memalign(
-            32,
-            (size_t)sectorSize
-        );
-
-    if (!sectorBuffer)
-    {
-        printf("CARD buffer   : allocation FAIL\n");
-        goto cleanup;
-    }
-
-
-    memset(
-        &file,
-        0,
-        sizeof(file)
-    );
-
-
-    result =
-        CH_MemCardOpen(
-            &session,
-            CH_CARD_PRESENTATION_FILENAME,
-            &file
-        );
-
-
-    if (result == CARD_ERROR_NOFILE)
-    {
-        result =
-            CH_MemCardCreate(
-                &session,
-                CH_CARD_PRESENTATION_FILENAME,
-                fileSize,
-                &file
-            );
-
-        if (result != CARD_ERROR_READY)
-        {
-            printf(
-                "%-13s: create FAIL (%ld)\n",
-                CH_CARD_PRESENTATION_FILENAME,
-                (long)result
-            );
-
-            goto cleanup;
-        }
-
-        created = true;
-        fileOpen = true;
-    }
-    else if (result == CARD_ERROR_READY)
-    {
-        fileOpen = true;
-    }
-    else
-    {
-        printf(
-            "%-13s: open FAIL (%ld)\n",
-            CH_CARD_PRESENTATION_FILENAME,
-            (long)result
-        );
-
-        goto cleanup;
-    }
-
-
-    memset(
-        &status,
-        0,
-        sizeof(status)
-    );
-
-
-    result =
-        CARD_GetStatus(
-            file.chn,
-            file.filenum,
-            &status
-        );
-
-    if (result != CARD_ERROR_READY)
-    {
-        printf(
-            "%-13s: status FAIL (%ld)\n",
-            CH_CARD_PRESENTATION_FILENAME,
-            (long)result
-        );
-
-        goto cleanup;
-    }
-
-
-    existingSectors =
-        status.len /
-        (u32)sectorSize;
 
 
     /*
-     * File geometry is part of the manifest-backed persistence contract.
+     * Application-save Open owns:
      *
-     * Never silently reinterpret, resize or recreate a same-named save
-     * whose geometry belongs to an older application format.
+     *   CARD work area
+     *   mount
+     *   physical geometry
+     *   open/create
+     *   transaction backend
+     *   CHTX init/recovery
+     *   sector scratch
+     *   presentation
      */
-    if (status.len != fileSize)
+    saveResult =
+        CH_ApplicationSaveOpen(
+            &save,
+            application,
+            descriptor,
+            CARD_SLOTA
+        );
+
+
+    if (
+        saveResult !=
+        CH_APPLICATION_SAVE_RESULT_OK
+    )
     {
-        printf(
-            "%-13s: geometry FAIL\n",
-            CH_CARD_PRESENTATION_FILENAME
+        printOpenFailure(
+            "App save",
+            saveResult,
+            &save
         );
 
-        printf(
-            "Existing      : %lu sectors / %lu bytes\n",
-            (unsigned long)existingSectors,
-            (unsigned long)status.len
-        );
-
-        printf(
-            "Manifest      : %lu sectors / %lu bytes\n",
-            (unsigned long)CH_CARD_FILE_SECTORS,
-            (unsigned long)fileSize
-        );
-
-        goto cleanup;
+        return false;
     }
+
+
+    created =
+        CH_ApplicationSaveWasCreated(
+            &save
+        );
 
 
     printf(
         "%-13s: %s\n",
-        CH_CARD_PRESENTATION_FILENAME,
-        created ? "created" : "opened"
+        descriptor->filename,
+        created
+            ? "created"
+            : "opened"
     );
 
     printf(
         "CARD geometry : PASS (%lu sectors)\n",
-        (unsigned long)CH_CARD_FILE_SECTORS
+        (unsigned long)
+            descriptor->sector_count
     );
-
-
-    memset(
-        &txContext,
-        0,
-        sizeof(txContext)
-    );
-
-    memset(
-        &txBackend,
-        0,
-        sizeof(txBackend)
-    );
-
-
-    if (!CH_TxMemCardBackendInit(
-            &txContext,
-            &session,
-            &file,
-            &txBackend))
-    {
-        printf("TX backend    : FAIL\n");
-        goto cleanup;
-    }
-
 
     printf(
-        "TX backend    : PASS (%lu sectors)\n",
-        (unsigned long)txBackend.sector_count
+        "App save open : PASS\n"
     );
 
 
-    /*
-     * A newly created file becomes a transaction container here.
-     *
-     * An existing valid file follows CH_TxInitialize()'s idempotent
-     * validation path and is not rewritten.
-     */
-    if (CH_TxInitialize(
-            &txBackend,
-            sectorBuffer,
-            (size_t)sectorSize) !=
-        CH_TX_RESULT_OK)
-    {
-        printf("Store init    : FAIL\n");
-        goto cleanup;
-    }
+    backend =
+        CH_ApplicationSaveBackend(
+            &save
+        );
 
-    storeOk = true;
+    sectorBuffer =
+        CH_ApplicationSaveSectorBuffer(
+            &save
+        );
 
-    printf("Store init    : PASS\n");
-
-
-    /*
-     * Presentation shares sector zero with the CHTX header. The
-     * presentation runtime performs read/modify/write and therefore
-     * preserves the transaction header at bytes 0..31.
-     */
-    presentationOk =
-        CH_CardPresentationApply(
-            &file,
-            sectorSize,
-            sectorBuffer,
-            HELLO_CARD_PRESENTATION_OFFSET,
-            ch_card_presentation_data,
-            CH_CARD_PRESENTATION_DATA_SIZE
+    sectorBufferSize =
+        CH_ApplicationSaveSectorBufferSize(
+            &save
         );
 
 
-    printf(
-        "Presentation  : %s\n",
-        presentationOk
-            ? "PASS"
-            : "FAIL"
-    );
-
-    if (!presentationOk)
+    if (
+        !backend ||
+        !sectorBuffer ||
+        sectorBufferSize == 0u
+    )
     {
+        printf("Store access  : FAIL\n");
         goto cleanup;
     }
 
 
     /*
-     * Seed one persistent object only when this physical application
-     * save file was freshly created.
+     * Application policy remains outside the generic lifecycle:
+     * seed this object only on physical first creation.
      */
     if (created)
     {
         if (CH_PersistPut(
-                &txBackend,
+                backend,
                 sectorBuffer,
-                (size_t)sectorSize,
+                sectorBufferSize,
                 NULL,
                 0u,
                 helloPersistKey,
@@ -377,6 +195,7 @@ bool HelloCardSmokeTest(void)
             goto cleanup;
         }
 
+
         printf("Store PUT     : PASS\n");
     }
     else
@@ -386,90 +205,101 @@ bool HelloCardSmokeTest(void)
 
 
     /*
-     * Close/reopen before the GET so persistence is recovered through a
-     * fresh card_file and transaction-backend instance.
+     * Deliberately close and reopen through the new high-level API.
+     *
+     * The same CH_ApplicationSaveSession is reused after Close(), proving
+     * the reusable closed-state contract from STEP 9B2A.
      */
     closeResult =
-        CH_MemCardClose(
-            &file
+        CH_ApplicationSaveClose(
+            &save
         );
 
-    if (closeResult != CARD_ERROR_READY)
+
+    if (
+        closeResult !=
+        CH_APPLICATION_SAVE_RESULT_OK
+    )
     {
         printf(
-            "Store close   : FAIL (%ld)\n",
-            (long)closeResult
+            "Store close   : FAIL (%d)\n",
+            (int)closeResult
         );
 
         goto cleanup;
     }
 
-    fileOpen = false;
+
+    printf("Store close   : PASS\n");
 
 
-    memset(
-        &file,
-        0,
-        sizeof(file)
-    );
-
-
-    result =
-        CH_MemCardOpen(
-            &session,
-            CH_CARD_PRESENTATION_FILENAME,
-            &file
+    saveResult =
+        CH_ApplicationSaveOpen(
+            &save,
+            application,
+            descriptor,
+            CARD_SLOTA
         );
 
-    if (result != CARD_ERROR_READY)
+
+    if (
+        saveResult !=
+        CH_APPLICATION_SAVE_RESULT_OK
+    )
+    {
+        printOpenFailure(
+            "Store reopen",
+            saveResult,
+            &save
+        );
+
+        goto cleanup;
+    }
+
+
+    /*
+     * Reopening an already-created application save must never report
+     * physical creation.
+     */
+    if (CH_ApplicationSaveWasCreated(
+            &save))
     {
         printf(
-            "Store reopen  : FAIL (%ld)\n",
-            (long)result
+            "Store reopen  : recreated FAIL\n"
         );
 
-        goto cleanup;
-    }
-
-    fileOpen = true;
-
-
-    memset(
-        &txContext,
-        0,
-        sizeof(txContext)
-    );
-
-    memset(
-        &txBackend,
-        0,
-        sizeof(txBackend)
-    );
-
-
-    if (!CH_TxMemCardBackendInit(
-            &txContext,
-            &session,
-            &file,
-            &txBackend))
-    {
-        printf("Store reopen  : backend FAIL\n");
-        goto cleanup;
-    }
-
-
-    if (CH_TxInitialize(
-            &txBackend,
-            sectorBuffer,
-            (size_t)sectorSize) !=
-        CH_TX_RESULT_OK)
-    {
-        printf("Store reopen  : init FAIL\n");
         goto cleanup;
     }
 
 
     printf("Store reopen  : PASS\n");
+
+
+    backend =
+        CH_ApplicationSaveBackend(
+            &save
+        );
+
+    sectorBuffer =
+        CH_ApplicationSaveSectorBuffer(
+            &save
+        );
+
+    sectorBufferSize =
+        CH_ApplicationSaveSectorBufferSize(
+            &save
+        );
+
+
+    if (
+        !backend ||
+        !sectorBuffer ||
+        sectorBufferSize == 0u
+    )
+    {
+        printf("Store access  : reopen FAIL\n");
+        goto cleanup;
+    }
 
 
     memset(
@@ -478,13 +308,14 @@ bool HelloCardSmokeTest(void)
         sizeof(output)
     );
 
-    objectSize = 0u;
+    objectSize =
+        0u;
 
 
     if (CH_PersistGet(
-            &txBackend,
+            backend,
             sectorBuffer,
-            (size_t)sectorSize,
+            sectorBufferSize,
             NULL,
             0u,
             helloPersistKey,
@@ -497,6 +328,9 @@ bool HelloCardSmokeTest(void)
         printf("Store GET     : FAIL\n");
         goto cleanup;
     }
+
+
+    printf("Store GET     : PASS\n");
 
 
     if (
@@ -513,68 +347,44 @@ bool HelloCardSmokeTest(void)
     }
 
 
-    persistOk = true;
-
-    printf("Store GET     : PASS\n");
     printf("Store verify  : PASS\n");
+
+    persistOk =
+        true;
 
 
 cleanup:
 
-    if (fileOpen)
-    {
-        closeResult =
-            CH_MemCardClose(
-                &file
-            );
-
-        fileOpen = false;
-    }
-
-
-    if (sectorBuffer)
-    {
-        free(
-            sectorBuffer
+    /*
+     * Close is safe for both a live session and one already cleaned up by
+     * a failed Open().
+     */
+    closeResult =
+        CH_ApplicationSaveClose(
+            &save
         );
-
-        sectorBuffer = NULL;
-    }
-
-
-    if (mounted)
-    {
-        unmountResult =
-            CH_MemCardUnmount(
-                &session
-            )
-                ? CARD_ERROR_READY
-                : CARD_ERROR_FATAL_ERROR;
-
-        mounted = false;
-    }
 
 
     if (
-        closeResult != CARD_ERROR_READY ||
-        unmountResult < CARD_ERROR_READY
+        closeResult !=
+        CH_APPLICATION_SAVE_RESULT_OK
     )
     {
-        printf(
-            "CARD cleanup  : FAIL (%ld/%ld)\n",
-            (long)closeResult,
-            (long)unmountResult
-        );
+        cleanupOk =
+            false;
 
-        return false;
+        printf(
+            "CARD cleanup  : FAIL (%d)\n",
+            (int)closeResult
+        );
+    }
+    else
+    {
+        printf("CARD cleanup  : PASS\n");
     }
 
 
-    printf("CARD cleanup  : PASS\n");
-
-
     return
-        storeOk &&
-        presentationOk &&
-        persistOk;
+        persistOk &&
+        cleanupOk;
 }
