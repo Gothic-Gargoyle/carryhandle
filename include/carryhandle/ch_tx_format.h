@@ -143,11 +143,17 @@ typedef struct CH_TxSuperblock
  * Scope and key are opaque byte sequences. CarryHandle assigns no string
  * encoding and comparisons are exact byte-for-byte comparisons.
  *
- * PUT:
- *   raw_size / stored_size / CRC fields describe the payload.
+ * raw_crc32 protects the uncompressed PUT payload.
  *
- * DELETE:
- *   carries the same scope + key but no payload.
+ * body_crc32 protects the complete variable-length stored body:
+ *
+ *   scope || key || stored payload
+ *
+ * This means corruption of logical identity bytes is detectable before
+ * a record can be treated as belonging to another object.
+ *
+ * DELETE carries scope + key but no payload. Its body CRC therefore
+ * protects scope || key.
  */
 typedef struct CH_TxRecordHeader
 {
@@ -168,7 +174,7 @@ typedef struct CH_TxRecordHeader
     uint32_t stored_size;
 
     uint32_t raw_crc32;
-    uint32_t stored_crc32;
+    uint32_t body_crc32;
 
     uint32_t record_sectors;
 

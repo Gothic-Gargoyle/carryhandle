@@ -573,7 +573,7 @@ enum
     RECORD_RAW_SIZE_OFFSET = 32,
     RECORD_STORED_SIZE_OFFSET = 36,
     RECORD_RAW_CRC_OFFSET = 40,
-    RECORD_STORED_CRC_OFFSET = 44,
+    RECORD_BODY_CRC_OFFSET = 44,
     RECORD_SECTORS_OFFSET = 48,
     RECORD_CODEC_OFFSET = 52,
     RECORD_RESERVED_OFFSET = 56,
@@ -612,8 +612,7 @@ static bool validRecordHeader(
                 CH_TX_CODEC_NONE &&
             record->raw_size == 0u &&
             record->stored_size == 0u &&
-            record->raw_crc32 == 0u &&
-            record->stored_crc32 == 0u;
+            record->raw_crc32 == 0u;
     }
 
     if (record->operation !=
@@ -627,9 +626,7 @@ static bool validRecordHeader(
     {
         return
             record->raw_size ==
-                record->stored_size &&
-            record->raw_crc32 ==
-                record->stored_crc32;
+                record->stored_size;
     }
 
     if (record->codec ==
@@ -734,8 +731,8 @@ bool CH_TxEncodeRecordHeader(
 
     putU32(
         buffer,
-        RECORD_STORED_CRC_OFFSET,
-        record->stored_crc32
+        RECORD_BODY_CRC_OFFSET,
+        record->body_crc32
     );
 
     putU32(
@@ -883,10 +880,10 @@ bool CH_TxDecodeRecordHeader(
             RECORD_RAW_CRC_OFFSET
         );
 
-    decoded.stored_crc32 =
+    decoded.body_crc32 =
         getU32(
             buffer,
-            RECORD_STORED_CRC_OFFSET
+            RECORD_BODY_CRC_OFFSET
         );
 
     decoded.record_sectors =
