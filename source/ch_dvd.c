@@ -49,6 +49,18 @@ static bool gc_fst_mounted;
 
 
 /*
+ * Unaligned DVD reads must not depend on transient heap availability.
+ * Keep a small permanently aligned bounce buffer and process larger
+ * requests in chunks.
+ */
+#define CH_DVD_BOUNCE_SIZE 8192u
+
+static uint8_t gc_dvd_bounce[CH_DVD_BOUNCE_SIZE]
+    __attribute__((aligned(32)));
+
+
+
+/*
  * GameCube low memory:
  *
  * 0x80000038 = FST pointer
@@ -351,50 +363,53 @@ static ssize_t CH_DVD_Read(
     }
     else
     {
-        uint32_t first =
-            (f->offset + f->pos) & ~31u;
+        uint32_t copied = 0;
 
-        uint32_t last =
-            ((f->offset + f->pos + amount + 31u)
-             & ~31u);
-
-        uint32_t read_len =
-            last - first;
-
-        uint8_t *tmp =
-            memalign(32, read_len);
-
-        uint32_t skip;
-
-        if (tmp == NULL)
+        while (copied < amount)
         {
-            r->_errno = ENOMEM;
-            return -1;
+            uint32_t absolute =
+                f->offset + f->pos + copied;
+
+            uint32_t first =
+                absolute & ~31u;
+
+            uint32_t skip =
+                absolute - first;
+
+            uint32_t chunk =
+                amount - copied;
+
+            uint32_t capacity =
+                CH_DVD_BOUNCE_SIZE - skip;
+
+            uint32_t read_len;
+
+            if (chunk > capacity)
+                chunk = capacity;
+
+            read_len =
+                (skip + chunk + 31u) & ~31u;
+
+            rc = DVD_ReadAbsPrio(
+                &block,
+                gc_dvd_bounce,
+                read_len,
+                first,
+                2);
+
+            if (rc < 0)
+            {
+                r->_errno = EIO;
+                return -1;
+            }
+
+            memcpy(
+                ptr + copied,
+                gc_dvd_bounce + skip,
+                chunk);
+
+            copied += chunk;
         }
-
-        rc = DVD_ReadAbsPrio(
-            &block,
-            tmp,
-            read_len,
-            first,
-            2);
-
-        if (rc < 0)
-        {
-            free(tmp);
-            r->_errno = EIO;
-            return -1;
-        }
-
-        skip =
-            (f->offset + f->pos) - first;
-
-        memcpy(
-            ptr,
-            tmp + skip,
-            amount);
-
-        free(tmp);
     }
 
     f->pos += amount;
