@@ -412,17 +412,24 @@ bool CH_VideoPresentIndexed8(
 
         unsigned int dx;
 
-        sy =
-            (unsigned int)(
-                (
-                    (uint64_t)dy *
-                    (uint64_t)chVideoHeight
-                ) /
-                (uint64_t)dstHeight
-            );
+        if (dstHeight == chVideoHeight)
+        {
+            sy = dy;
+        }
+        else
+        {
+            sy =
+                (unsigned int)(
+                    (
+                        (uint64_t)dy *
+                        (uint64_t)chVideoHeight
+                    ) /
+                    (uint64_t)dstHeight
+                );
 
-        if (sy >= chVideoHeight)
-            sy = chVideoHeight - 1u;
+            if (sy >= chVideoHeight)
+                sy = chVideoHeight - 1u;
+        }
 
         src =
             pixels +
@@ -447,29 +454,37 @@ bool CH_VideoPresentIndexed8(
             unsigned int u;
             unsigned int v;
 
-            sx0 =
-                (unsigned int)(
-                    (
-                        (uint64_t)dx *
-                        (uint64_t)chVideoWidth
-                    ) /
-                    (uint64_t)dstWidth
-                );
+            if (dstWidth == chVideoWidth)
+            {
+                sx0 = dx;
+                sx1 = dx + 1u;
+            }
+            else
+            {
+                sx0 =
+                    (unsigned int)(
+                        (
+                            (uint64_t)dx *
+                            (uint64_t)chVideoWidth
+                        ) /
+                        (uint64_t)dstWidth
+                    );
 
-            sx1 =
-                (unsigned int)(
-                    (
-                        (uint64_t)(dx + 1u) *
-                        (uint64_t)chVideoWidth
-                    ) /
-                    (uint64_t)dstWidth
-                );
+                sx1 =
+                    (unsigned int)(
+                        (
+                            (uint64_t)(dx + 1u) *
+                            (uint64_t)chVideoWidth
+                        ) /
+                        (uint64_t)dstWidth
+                    );
 
-            if (sx0 >= chVideoWidth)
-                sx0 = chVideoWidth - 1u;
+                if (sx0 >= chVideoWidth)
+                    sx0 = chVideoWidth - 1u;
 
-            if (sx1 >= chVideoWidth)
-                sx1 = chVideoWidth - 1u;
+                if (sx1 >= chVideoWidth)
+                    sx1 = chVideoWidth - 1u;
+            }
 
             i0 = src[sx0];
             i1 = src[sx1];
