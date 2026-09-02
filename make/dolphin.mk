@@ -19,13 +19,15 @@ DOLPHIN_ARGS ?= \
 	-b \
 	-e
 
+TEST_TARGET ?= iso
+
 TEST_PREPARE ?=
 
 
 .PHONY: test
 
 
-test: iso $(TEST_PREPARE)
+test: $(TEST_TARGET) $(TEST_PREPARE)
 
 	@test -f "$(DOLPHIN_IMAGE)" || \
 		( echo "ERROR: missing test image $(DOLPHIN_IMAGE)"; false )
