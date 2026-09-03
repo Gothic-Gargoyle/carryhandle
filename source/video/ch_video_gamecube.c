@@ -34,6 +34,25 @@ static uint8_t chVideoPaletteY[256];
 static uint8_t chVideoPaletteU[256];
 static uint8_t chVideoPaletteV[256];
 
+
+/*
+ * CH_VIDEO_PACKED_1TO1
+ *
+ * Pre-packed GameCube XFB palette entry:
+ *
+ *     byte 0 = Y
+ *     byte 1 = U
+ *     byte 2 = Y
+ *     byte 3 = V
+ *
+ * The duplicated Y lets the exact-size indexed presenter
+ * produce one Y0 U Y1 V output word from two palette loads
+ * and one 32-bit XFB store.
+ *
+ * 256 entries = 1024 bytes.
+ */
+static uint32_t chVideoPalettePacked[256];
+
 static bool chVideoPaletteValid;
 static bool chVideoInitialized;
 
@@ -347,6 +366,22 @@ bool CH_VideoSetPaletteRGB8(
             &chVideoPaletteU[i],
             &chVideoPaletteV[i]
         );
+
+        chVideoPalettePacked[i] =
+            (
+                (uint32_t)
+                    chVideoPaletteY[i] << 24
+            ) |
+            (
+                (uint32_t)
+                    chVideoPaletteU[i] << 16
+            ) |
+            (
+                (uint32_t)
+                    chVideoPaletteY[i] << 8
+            ) |
+            (uint32_t)
+                chVideoPaletteV[i];
     }
 
     chVideoPaletteValid = true;
@@ -400,6 +435,97 @@ bool CH_VideoPresentIndexed8(
      * For Quake2Cube's 640x480 source this degenerates to a
      * straight 1:1 conversion.
      */
+    /*
+     * Exact-size indexed8 fast path.
+     *
+     * The generic scaling converter remains completely intact
+     * below for mismatched source/output dimensions.
+     */
+    if (
+        dstWidth == chVideoWidth &&
+        dstHeight == chVideoHeight
+    )
+    {
+        for (dy = 0u;
+             dy < dstHeight;
+             ++dy)
+        {
+            const uint8_t *src;
+            uint32_t *dst;
+
+            unsigned int pairs;
+
+            src =
+                pixels +
+                (size_t)dy * pitch;
+
+            dst =
+                (uint32_t *)
+                (
+                    dstBase +
+                    (size_t)dy *
+                    (size_t)dstWidth *
+                    VI_DISPLAY_PIX_SZ
+                );
+
+            pairs =
+                dstWidth >> 1;
+
+            while (pairs-- > 0u)
+            {
+                uint32_t p0;
+                uint32_t p1;
+                uint32_t uv;
+
+                p0 =
+                    chVideoPalettePacked[
+                        *src++
+                    ];
+
+                p1 =
+                    chVideoPalettePacked[
+                        *src++
+                    ];
+
+                /*
+                 * GameCube is big-endian.
+                 *
+                 * U and V occupy independent 16-bit lanes
+                 * inside 0x00ff00ff, so both rounded averages
+                 * can be calculated in parallel without
+                 * cross-channel carry.
+                 */
+                uv =
+                    (
+                        (
+                            (
+                                p0 &
+                                0x00ff00ffu
+                            ) +
+                            (
+                                p1 &
+                                0x00ff00ffu
+                            ) +
+                            0x00010001u
+                        ) >> 1
+                    ) &
+                    0x00ff00ffu;
+
+                *dst++ =
+                    (
+                        p0 &
+                        0xff000000u
+                    ) |
+                    (
+                        p1 &
+                        0x0000ff00u
+                    ) |
+                    uv;
+            }
+        }
+    }
+    else
+    {
     for (dy = 0u;
          dy < dstHeight;
          ++dy)
@@ -524,6 +650,7 @@ bool CH_VideoPresentIndexed8(
             dst[dx * 2u + 3u] =
                 (uint8_t)v;
         }
+    }
     }
 
     framebufferSize =
