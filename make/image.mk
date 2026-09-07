@@ -24,10 +24,8 @@ GCM_ROOT ?= \
 GCM_OUTPUT ?= \
 	$(PROJECT_DIR)/$(TARGET).iso
 
-GCM_TITLE ?= \
-	$(TARGET)
-
-GCM_REGION ?= PAL
+GCM_MANIFEST ?= \
+	$(PROJECT_DIR)/carryhandle.cfg
 
 GCM_PREPARE ?=
 
@@ -52,6 +50,9 @@ iso: all $(GCM_PREPARE)
 	@test -f "$(GCM_APPLOADER)" || \
 		( echo "ERROR: missing apploader $(GCM_APPLOADER)"; false )
 
+	@test -f "$(GCM_MANIFEST)" || \
+		( echo "ERROR: missing CarryHandle manifest $(GCM_MANIFEST)"; false )
+
 	@test -d "$(GCM_ROOT)" || \
 		( echo "ERROR: missing disc root $(GCM_ROOT)"; false )
 
@@ -60,8 +61,7 @@ iso: all $(GCM_PREPARE)
 		--apploader "$(GCM_APPLOADER)" \
 		--root "$(GCM_ROOT)" \
 		--output "$(GCM_OUTPUT)" \
-		--title "$(GCM_TITLE)" \
-		--region "$(GCM_REGION)" \
+		--manifest "$(GCM_MANIFEST)" \
 		$(GCM_EXTRA_ARGS)
 
 	@echo
@@ -74,6 +74,7 @@ help::
 	@echo
 	@echo "Disc image:"
 	@echo "  make iso           Compile and build the native GameCube GCM/FST image"
+	@echo "                     Identity comes from carryhandle.cfg"
 
 
 endif

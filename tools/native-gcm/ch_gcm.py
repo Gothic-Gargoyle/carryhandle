@@ -131,6 +131,7 @@ def build_string_table(entries: list[Node]) -> bytes:
 
 
 def make_boot_bin(
+    disc_id: bytes,
     title: str,
     dol_offset: int,
     fst_offset: int,
@@ -142,9 +143,12 @@ def make_boot_bin(
 
     b = bytearray(BOOT_BIN_SIZE)
 
-    # Game ID:
+    # GameCube disc ID:
     #   4-byte game code + 2-byte maker code.
-    b[0x000:0x006] = b"GDOE01"
+    if len(disc_id) != 6:
+        raise ValueError("GameCube disc ID must be exactly 6 bytes")
+
+    b[0x000:0x006] = disc_id
 
     # Disc number / version.
     b[0x006] = 0
@@ -303,21 +307,59 @@ def main() -> None:
     )
 
     ap.add_argument(
-        "--title",
-        default="CARRYHANDLE"
-    )
-
-    ap.add_argument(
-        "--region",
-        choices=tuple(GC_REGIONS),
-        default="PAL",
-        help=(
-            "GameCube disc region written to BI2 "
-            "(default: PAL)"
-        ),
+        "--manifest",
+        required=True,
+        type=Path,
+        help="CarryHandle application manifest"
     )
 
     args = ap.parse_args()
+
+    manifest_tool = (
+        Path(__file__).resolve().parent.parent
+        / "ch_manifest.py"
+    )
+
+    if not manifest_tool.is_file():
+        raise SystemExit(
+            f"CarryHandle manifest tool missing: {manifest_tool}"
+        )
+
+    manifest_namespace = __import__("runpy").run_path(
+        str(manifest_tool)
+    )
+
+    try:
+        manifest = manifest_namespace["load_manifest"](
+            args.manifest
+        )
+    except Exception as exc:
+        raise SystemExit(
+            f"CarryHandle manifest error: {exc}"
+        ) from exc
+
+    disc_game_id = manifest.get(
+        "disc_game_id"
+    )
+
+    if not disc_game_id:
+        raise SystemExit(
+            "CarryHandle manifest requires "
+            "application.disc_game_id for native GCM output"
+        )
+
+    region_disc_codes = {
+        "NTSC-J": "J",
+        "NTSC-U": "E",
+        "PAL": "P",
+    }
+
+    disc_id = (
+        "G"
+        + disc_game_id
+        + region_disc_codes[manifest["region"]]
+        + manifest["company_code"]
+    ).encode("ascii")
 
     dol = args.dol.read_bytes()
     app = args.apploader.read_bytes()
@@ -391,7 +433,8 @@ def main() -> None:
     user_length = current - data_offset
 
     boot = make_boot_bin(
-        title=args.title,
+        disc_id=disc_id,
+        title=manifest["name"],
         dol_offset=dol_offset,
         fst_offset=fst_offset,
         fst_size=len(fst),
@@ -400,9 +443,7 @@ def main() -> None:
         user_length=user_length,
     )
 
-    region_value = GC_REGIONS[
-        args.region
-    ]
+    region_value = manifest["region_bi2"]
 
     bi2 = make_bi2(
         region_value
@@ -479,7 +520,7 @@ def main() -> None:
     print("=========================")
     print(f"output       : {args.output}")
     print(
-        f"region       : {args.region} "
+        f"region       : {manifest['region']} "
         f"(BI2={region_value})"
     )
     print(f"size         : {len(image):,} bytes")

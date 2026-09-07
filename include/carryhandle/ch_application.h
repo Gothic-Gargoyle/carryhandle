@@ -24,7 +24,8 @@ typedef enum CH_ApplicationRegion
  *
  * Returned strings have static storage duration.
  *
- * game_code    : exactly 4 ASCII bytes
+ * game_code    : exactly 4 ASCII bytes; Memory Card identity
+ * disc_game_id : exactly 2 ASCII bytes for manifest v3+
  * company_code : exactly 2 ASCII bytes
  *
  * store_id is deliberately independent from game_code.
@@ -36,6 +37,7 @@ typedef struct CH_ApplicationInfo
     const char *name;
 
     const char *game_code;
+    const char *disc_game_id;
     const char *company_code;
 
     CH_ApplicationRegion region;

@@ -14,10 +14,10 @@ import re
 import sys
 
 
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3
 
 SUPPORTED_MANIFEST_VERSIONS = frozenset(
-    (1, 2)
+    (1, 2, 3)
 )
 
 REGIONS = {
@@ -213,15 +213,26 @@ def load_manifest(path):
             f"unsupported manifest_version {version}"
         )
 
+    application_fields = (
+        "name",
+        "game_code",
+        "company_code",
+        "region",
+    )
+
+    if version >= 3:
+        application_fields = (
+            "name",
+            "game_code",
+            "disc_game_id",
+            "company_code",
+            "region",
+        )
+
     app = require_section(
         parser,
         "application",
-        (
-            "name",
-            "game_code",
-            "company_code",
-            "region",
-        ),
+        application_fields,
     )
 
     name = require_ascii(
@@ -235,6 +246,15 @@ def load_manifest(path):
         "application.game_code",
         exact=4,
     )
+
+    disc_game_id = None
+
+    if version >= 3:
+        disc_game_id = require_ascii(
+            app["disc_game_id"],
+            "application.disc_game_id",
+            exact=2,
+        )
 
     company_code = require_ascii(
         app["company_code"],
@@ -354,6 +374,7 @@ def load_manifest(path):
         "manifest_version": version,
         "name": name,
         "game_code": game_code,
+        "disc_game_id": disc_game_id,
         "company_code": company_code,
         "region": region,
         "region_bi2": REGIONS[region],
@@ -393,6 +414,9 @@ def render_application_header(manifest):
 
 #define CH_GENERATED_GAME_CODE \\
     {c_string(manifest["game_code"])}
+
+#define CH_GENERATED_DISC_GAME_ID \\
+    {c_string(manifest["disc_game_id"] or "")}
 
 #define CH_GENERATED_COMPANY_CODE \\
     {c_string(manifest["company_code"])}
@@ -492,6 +516,10 @@ def main():
     print(
         f"  game code    : "
         f"{manifest['game_code']}"
+    )
+    print(
+        f"  disc game id : "
+        f"{manifest['disc_game_id'] or '(none)'}"
     )
     print(
         f"  company code : "
