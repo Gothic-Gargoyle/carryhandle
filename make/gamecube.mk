@@ -125,7 +125,6 @@ ifneq ($(BUILD),$(notdir $(CURDIR)))
 
 export OUTPUT  := $(PROJECT_DIR)/$(TARGET)
 export DEPSDIR := $(PROJECT_DIR)/$(BUILD)
-export VPATH   := $(SOURCES)
 
 CPPFILES ?=
 sFILES   ?=
@@ -203,6 +202,17 @@ run: all
 # -----------------------------------------------------------------------------
 
 else
+
+# Search source directories only for source prerequisites.
+#
+# A general VPATH also applies to object targets.  That lets an unrelated
+# build leave foo.o beside foo.c and causes this build to reuse that object
+# instead of producing its own foo.o in $(BUILD).  Restrict lookup to the
+# source suffixes CarryHandle's object inventory supports.
+vpath %.c $(SOURCES)
+vpath %.cpp $(SOURCES)
+vpath %.s $(SOURCES)
+vpath %.S $(SOURCES)
 
 DEPENDS := \
 	$(OFILES:.o=.d)
