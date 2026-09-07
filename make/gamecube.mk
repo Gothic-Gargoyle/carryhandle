@@ -15,6 +15,7 @@
 #   selected CarryHandle source modules
 #   common clean/run mechanics
 #   DEBUG/TRACE hooks
+#   default parallel build policy
 # -----------------------------------------------------------------------------
 
 ifndef PROJECT_DIR
@@ -31,7 +32,7 @@ CARRY_ROOT ?= \
 
 
 # -----------------------------------------------------------------------------
-# DoomCube-style common build options
+# Common build options
 # -----------------------------------------------------------------------------
 
 DEBUG ?= 1
@@ -39,6 +40,28 @@ TRACE ?= 0
 
 APP_DEBUG_CFLAGS ?=
 APP_TRACE_CFLAGS ?=
+
+# Use all available logical processors by default.
+#
+# Explicit GNU Make parallelism always wins:
+#
+#   make -j4
+#   make --jobs=4
+#
+# CH_JOBS overrides CarryHandle's detected default when no explicit GNU Make
+# job setting or inherited jobserver is already active:
+#
+#   make CH_JOBS=4
+#
+CH_JOBS ?= \
+	$(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)
+
+CH_MAKE_JOB_FLAGS := \
+	$(filter -j% j% --jobs% --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS))
+
+ifeq ($(strip $(CH_MAKE_JOB_FLAGS)),)
+MAKEFLAGS += -j$(CH_JOBS)
+endif
 
 CH_CFILES ?=
 
@@ -98,6 +121,8 @@ endif
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 
+.DEFAULT_GOAL := all
+
 export OUTPUT  := $(PROJECT_DIR)/$(TARGET)
 export DEPSDIR := $(PROJECT_DIR)/$(BUILD)
 export VPATH   := $(SOURCES)
@@ -120,6 +145,7 @@ export OFILES := \
 	all \
 	$(BUILD) \
 	clean \
+	help \
 	run
 
 
@@ -134,6 +160,21 @@ $(BUILD):
 		-C "$(PROJECT_DIR)/$(BUILD)" \
 		-f "$(PROJECT_MAKEFILE)" \
 		"$(PROJECT_DIR)/$(TARGET).dol"
+
+
+help::
+	@echo "CarryHandle GameCube build"
+	@echo
+	@echo "Targets:"
+	@echo "  make / make all    Incrementally compile the application"
+	@echo "  make run           Compile, then launch on hardware with RUNNER"
+	@echo "  make clean         Remove generated build outputs"
+	@echo
+	@echo "Options:"
+	@echo "  DEBUG=0|1          Application debug hooks (default: $(DEBUG))"
+	@echo "  TRACE=0|1          Application trace hooks (default: $(TRACE))"
+	@echo "  CH_JOBS=N          Default parallel jobs (detected: $(CH_JOBS))"
+	@echo "  make -jN           Explicit GNU Make job count; overrides CH_JOBS"
 
 
 clean:

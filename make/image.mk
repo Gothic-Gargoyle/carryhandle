@@ -38,7 +38,7 @@ CLEAN_FILES += \
 	"$(GCM_OUTPUT)"
 
 
-.PHONY: iso
+.PHONY: iso help
 
 
 iso: all $(GCM_PREPARE)
@@ -68,6 +68,12 @@ iso: all $(GCM_PREPARE)
 	@echo "Built native GameCube image:"
 	@ls -lh "$(GCM_OUTPUT)"
 	@echo
+
+
+help::
+	@echo
+	@echo "Disc image:"
+	@echo "  make iso           Compile and build the native GameCube GCM/FST image"
 
 
 endif
