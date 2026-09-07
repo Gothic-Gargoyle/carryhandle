@@ -180,7 +180,7 @@ def make_bi2(region: int) -> bytes:
     """
     Build the GameCube BI2 block.
 
-    DoomCube's homebrew apploader does not require most Nintendo SDK
+    CarryHandle's homebrew apploader does not require most Nintendo SDK
     BI2 metadata, so the unused fields remain zero.
 
     BI2 + 0x18 is the GameCube region field:
@@ -190,7 +190,7 @@ def make_bi2(region: int) -> bytes:
         2 = PAL / Europe
 
     The region identifies the disc to the platform/emulator.  It does
-    not force DoomCube's runtime video mode.
+    not force the application's runtime video mode.
     """
 
     if region not in GC_REGIONS.values():

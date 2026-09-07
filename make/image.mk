@@ -10,7 +10,7 @@ ifneq ($(BUILD),$(notdir $(CURDIR)))
 
 
 GCM_BUILDER ?= \
-	$(CARRY_ROOT)/tools/native-gcm/mkdoomcube.py
+	$(CARRY_ROOT)/tools/native-gcm/ch_gcm.py
 
 GCM_APPLOADER ?= \
 	$(CARRY_ROOT)/tools/native-gcm/apploader.bin
