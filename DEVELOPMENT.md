@@ -132,6 +132,96 @@ Each substantial module should have:
 4. an isolated example or regression test
 5. no application-specific policy
 
+## Building and testing CarryHandle
+
+CarryHandle uses the normal devkitPro GameCube toolchain rather than a
+private compiler environment.
+
+Core development requirements are:
+
+```text
+devkitPro
+devkitPPC
+libogc2
+GNU Make
+Python 3
+```
+
+Optional modules or consumers may add their own dependencies. A low-level
+CarryHandle module should not acquire an unrelated dependency merely because
+one consumer already links it.
+
+### Building examples
+
+The repository root provides ordinary Make orchestration:
+
+```bash
+make
+make examples
+make hello
+```
+
+The hello example can also be built directly:
+
+```bash
+make -C examples/hello
+```
+
+Generated build products belong below build directories rather than alongside
+source files.
+
+Normal development should use incremental builds. `make clean` and forced
+rebuilds are diagnostic or destructive operations and should not be routine
+prerequisites.
+
+### Testing shared changes
+
+Framework changes should be proven at the narrowest useful level first and
+then through real consumers when they affect shared behavior.
+
+A useful progression is:
+
+```text
+syntax / host-tool validation
+        ↓
+isolated example
+        ↓
+consumer compile
+        ↓
+consumer image build
+        ↓
+Dolphin runtime proof
+        ↓
+real GameCube hardware where relevant
+```
+
+Changes to shared Make fragments, native GCM tooling, manifests, input,
+video, DVD/FST, Memory Card, persistence, or other cross-application services
+should be exercised by more than one unrelated consumer whenever practical.
+
+DoomCube and Quake2Cube are current dogfood consumers. Passing in one does not
+by itself establish that a supposedly generic change is application
+independent.
+
+Real-hardware-sensitive behavior such as DVD alignment, cache management,
+video presentation, controller operation, rumble, and Memory Card access
+requires hardware validation when a change can affect it.
+
+### Developing against a local CarryHandle checkout
+
+A consumer normally uses its pinned `deps/carryhandle` submodule.
+
+During CarryHandle development, point the consumer explicitly at the working
+CarryHandle checkout rather than rewriting or dirtying the submodule. The
+canonical shared variable is:
+
+```bash
+make CARRY_ROOT=/path/to/carryhandle test
+```
+
+A consumer may expose a project-specific wrapper variable which ultimately
+sets `CARRY_ROOT`.
+
 ## Examples
 
 Examples are part of the framework design process.
@@ -153,33 +243,27 @@ storage
 Examples should demonstrate CarryHandle rather than reimplementing large
 applications.
 
-## Testing
+## Consumer ports as regression oracles
 
-Whenever practical, test on:
+CarryHandle is developed against real applications rather than speculative
+framework use cases.
 
-1. build/toolchain
-2. Dolphin
-3. real GameCube hardware
+DoomCube and Quake2Cube are current regression oracles for behavior that has
+already been proven in application development.
 
-Emulator success alone does not prove correct hardware behavior.
+Consumer ports can answer questions such as:
 
-Known hardware requirements such as DVD alignment and cache management
-must receive explicit tests.
+- what hardware behavior is actually required?
+- which alignment or cache constraints matter?
+- which lifecycle survives real application usage?
+- which failure cases have already been encountered?
+- whether an API is genuinely reusable across unrelated engines
 
-## DoomCube as regression oracle
+CarryHandle should not remain source-coupled to any consumer after reusable
+behavior has been extracted.
 
-The released DoomCube implementation is a reference for behavior that
-was already proven during development.
-
-CarryHandle extraction may use DoomCube to answer questions such as:
-
-- what hardware behavior was required?
-- which alignment restrictions mattered?
-- which lifecycle survived real application usage?
-- which failure cases were discovered?
-
-CarryHandle should not remain source-coupled to DoomCube after
-extraction.
+Application policy remains in the application repository. CarryHandle owns
+only the reusable GameCube platform mechanism.
 
 ## Commits
 
@@ -197,45 +281,29 @@ Add native DVD access
 
 Avoid giant commits that simultaneously extract multiple subsystems.
 
-## First milestones
+## Current development direction
 
-### Milestone 0 — Bootstrap
+CarryHandle has moved beyond its bootstrap/extraction-only phase and is now
+consumed by multiple independent GameCube ports.
 
-- project documentation
-- source/include layout
-- namespace
-- version API
+New framework work should therefore be driven by demonstrated reusable needs
+across consumers rather than by the historical bootstrap milestone order.
 
-### Milestone 1 — Hello GameCube
-
-- concrete Makefile infrastructure
-- native GameCube executable
-- simplest useful CarryHandle initialization
-- controller-driven clean exit or idle loop
-- Dolphin test
-
-### Milestone 2 — DoomCube quarry map
-
-Inventory GameCube-specific DoomCube code and classify each component as:
+The preferred cycle is:
 
 ```text
-EXTRACT
-ADAPT
-LEAVE
+consumer need
+    ↓
+identify reusable platform behavior
+    ↓
+define or refine the CH_* boundary
+    ↓
+prove the CarryHandle implementation
+    ↓
+dogfood it in independent consumers
+    ↓
+pin the proven CarryHandle revision
 ```
 
-### Later milestones
-
-Extract only one coherent subsystem at a time.
-
-Current likely order:
-
-1. input
-2. rumble
-3. DVD/FST
-4. platform/video helpers
-5. Memory Card primitives
-6. transactional storage
-7. native disc tooling
-
-The order may change after the quarry analysis.
+Application-specific renderer policy, game rules, asset policy, save
+serialization, and release semantics remain in the application repositories.

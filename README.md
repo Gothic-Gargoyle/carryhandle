@@ -109,7 +109,6 @@ carryhandle/
 ├── tools/
 ├── docs/
 ├── README.md
-├── COMPILING.md
 ├── TECHNICAL.md
 └── DEVELOPMENT.md
 ```
@@ -130,25 +129,158 @@ Each major module should eventually have a corresponding example.
 
 ## Using CarryHandle
 
-The initial distribution model is **vendored source/library usage**.
+CarryHandle is intended to live inside the consuming application's source
+tree as a **pinned Git submodule**.
 
-A project may keep CarryHandle beside or inside its own source tree,
-including through a Git submodule if desired.
-
-For example:
+The canonical layout is:
 
 ```text
 mygame/
-├── carryhandle/
+├── carryhandle.cfg
+├── deps/
+│   └── carryhandle/
 ├── source/
-├── data/
 └── Makefile
 ```
 
-Installing CarryHandle globally into the devkitPro environment is not a
-requirement.
+Clone a consumer together with its pinned CarryHandle revision using:
 
-A conventional installation mechanism may be added later.
+```bash
+git clone --recurse-submodules <repository>
+```
+
+For an existing checkout:
+
+```bash
+git submodule update --init --recursive
+```
+
+Installing CarryHandle globally into the devkitPro environment is not
+required.
+
+### Application manifest
+
+Applications using CarryHandle's shared application and image tooling provide
+a project-level `carryhandle.cfg`.
+
+Manifest version 3 separates Memory Card identity from GameCube disc identity:
+
+```ini
+[carryhandle]
+manifest_version = 3
+
+[application]
+name = My Game
+game_code = MYGM
+disc_game_id = MG
+company_code = CH
+region = PAL
+
+[persistence]
+store_id = my-game
+```
+
+The identity fields are:
+
+| Field | Purpose |
+| --- | --- |
+| `name` | Human-readable application and disc title |
+| `game_code` | Exactly 4 ASCII bytes; application/Memory Card game code |
+| `disc_game_id` | Exactly 2 ASCII bytes; GameCube disc game identifier |
+| `company_code` | Exactly 2 ASCII bytes; maker/company identity |
+| `region` | `NTSC-J`, `NTSC-U`, or `PAL` |
+| `store_id` | CarryHandle persistence namespace |
+
+The six-byte GameCube disc ID is constructed as:
+
+```text
+G + disc_game_id + region character + company_code
+```
+
+The region characters are:
+
+```text
+NTSC-J -> J
+NTSC-U -> E
+PAL    -> P
+```
+
+`game_code` and `disc_game_id` are deliberately separate. Existing
+applications should preserve their Memory Card game/company identity so that
+existing card data remains accessible.
+
+Validate a manifest with:
+
+```bash
+python3 deps/carryhandle/tools/ch_manifest.py carryhandle.cfg
+```
+
+### Shared GameCube build contract
+
+CarryHandle's shared Make fragments provide the normal consumer workflow:
+
+```text
+make / make all   incremental compile
+make iso          incremental compile + native GameCube image
+make dolphin      launch the existing image without rebuilding
+make test         incremental compile + image + Dolphin
+make run          compile + configured hardware launch
+make clean        explicitly remove generated output
+make help         show available targets
+```
+
+CarryHandle automatically uses the available processor count when the caller
+has not supplied another GNU Make job setting.
+
+Override the automatic default with:
+
+```bash
+make CH_JOBS=4
+```
+
+An explicit GNU Make job setting still takes precedence:
+
+```bash
+make -j2
+```
+
+Routine development should use incremental builds. `make clean` and forced
+rebuilds are diagnostic or destructive operations rather than normal build
+steps.
+
+### Consumer integration
+
+A conventional consumer points CarryHandle at its pinned submodule:
+
+```make
+CARRY_ROOT ?= $(abspath $(PROJECT_DIR)/deps/carryhandle)
+```
+
+Applications select the CarryHandle modules they need and include the shared
+Make fragments from `$(CARRY_ROOT)/make/`.
+
+During CarryHandle development, a consumer can explicitly point at a separate
+working checkout:
+
+```bash
+make CARRY_ROOT=/path/to/carryhandle test
+```
+
+The checked-in submodule should remain pinned to a published, tested
+CarryHandle commit.
+
+### Updating CarryHandle in a consumer
+
+Move the submodule deliberately to the CarryHandle revision being adopted:
+
+```bash
+git -C deps/carryhandle fetch origin
+git -C deps/carryhandle checkout <commit>
+git add deps/carryhandle
+```
+
+The parent repository then records that exact CarryHandle revision as its
+submodule gitlink.
 
 ## Platform
 
@@ -162,13 +294,13 @@ Wii support and other platforms are outside the initial project scope.
 
 ## Current status
 
-CarryHandle is in early development.
+CarryHandle is in active development and is dogfooded by multiple independent
+GameCube ports, including DoomCube and Quake2Cube.
 
-The initial API and architecture are being extracted from platform code
-proven in DoomCube, but Doom-specific behavior is deliberately excluded.
+Reusable platform behavior belongs in CarryHandle; engine-specific policy
+remains in the consuming application.
 
 See:
 
-- [COMPILING.md](COMPILING.md)
 - [TECHNICAL.md](TECHNICAL.md)
 - [DEVELOPMENT.md](DEVELOPMENT.md)

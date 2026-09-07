@@ -119,6 +119,134 @@ GameCube disc image / generated artifacts
 
 Host tools are not runtime library modules.
 
+## Application metadata and shared build tooling
+
+`carryhandle.cfg` is build-time application metadata. The GameCube executable
+does not parse the INI file at runtime.
+
+`tools/ch_manifest.py` validates the manifest and can generate immutable
+application metadata consumed by `CH_ApplicationInfo`.
+
+Manifest version 3 deliberately separates the application's Memory Card
+identity from its GameCube disc identity:
+
+```text
+game_code
+    exactly 4 ASCII bytes
+    application / Memory Card game code
+
+disc_game_id
+    exactly 2 ASCII bytes
+    GameCube disc game identifier
+
+company_code
+    exactly 2 ASCII bytes
+    maker / company identity
+
+region
+    NTSC-J, NTSC-U, or PAL
+```
+
+The native six-byte GameCube disc ID is derived as:
+
+```text
+"G"
++ disc_game_id
++ region character
++ company_code
+```
+
+The disc-region mapping is:
+
+```text
+NTSC-J -> J
+NTSC-U -> E
+PAL    -> P
+```
+
+The same validated manifest supplies the human-readable disc title and the BI2
+region value.
+
+This separation is intentional. Memory Card identity and disc identity are
+different concepts and must not be conflated merely because both contain game
+and company identifiers.
+
+### Shared Make fragments
+
+CarryHandle provides reusable build mechanics in:
+
+```text
+make/gamecube.mk
+make/image.mk
+make/dolphin.mk
+```
+
+Their ownership is:
+
+```text
+make/gamecube.mk
+    shared GameCube compile mechanics
+    selected CH_* source modules
+    incremental/default parallel build policy
+
+make/image.mk
+    native GameCube GCM/FST packaging
+    manifest-driven disc identity
+
+make/dolphin.mk
+    launch of an existing image
+    incremental build/package/test workflow
+```
+
+Applications own their engine sources, assets, staging rules, release policy,
+and application-specific test semantics.
+
+CarryHandle owns reusable platform and build mechanics.
+
+### Native image tooling
+
+Native GameCube image construction is host-side CarryHandle tooling rather
+than a runtime library service.
+
+The application provides:
+
+```text
+compiled DOL
+disc-root staging tree
+carryhandle.cfg
+```
+
+CarryHandle provides:
+
+```text
+apploader
+native GCM/FST builder
+manifest validation
+shared image Make rules
+```
+
+The native image builder writes the GameCube boot header, BI2 region data, DOL
+location, FST, and staged file data.
+
+Runtime DVD/FST access is a separate concern from host-side image creation.
+
+### Dependency pinning
+
+The canonical consumer layout keeps CarryHandle as a Git submodule at:
+
+```text
+deps/carryhandle
+```
+
+The parent repository records a `160000` gitlink to the exact CarryHandle
+commit proven by that application.
+
+This makes the dependency reproducible while still allowing a developer to
+override `CARRY_ROOT` explicitly when testing a separate CarryHandle checkout.
+
+A consumer must not depend on a sibling `../carryhandle` checkout as its normal
+build configuration.
+
 ## Public API
 
 All public CarryHandle symbols use the `CH_` namespace.
