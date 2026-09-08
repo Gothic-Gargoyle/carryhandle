@@ -90,6 +90,13 @@ SOURCES += \
 CFILES += \
 	$(CH_CFILES)
 
+# CH_DVD_REQUIRES_FAT
+# Swiss-launched image backing uses the libfat-compatible API supplied by
+# libogc2-libfat or libogc2-libdvm.
+ifneq ($(filter ch_dvd.c,$(CH_CFILES)),)
+APP_LIBS := -lfat $(APP_LIBS)
+endif
+
 # Consumers select modules; CarryHandle owns where its public headers live.
 APP_INCLUDES += \
 	$(CARRY_ROOT)/include
@@ -161,6 +168,21 @@ CLEAN_DIRS ?=
 
 
 # -----------------------------------------------------------------------------
+# Include policy
+# -----------------------------------------------------------------------------
+#
+# Compute this in both the outer and recursive child invocation. Consumers may
+# have legacy INCLUDE assignments earlier in their Makefiles; CarryHandle owns
+# the final include set for the scaffold and must reassert it after inclusion.
+#
+export INCLUDE := \
+	$(foreach dir,$(APP_INCLUDES),-I$(dir)) \
+	-I$(PROJECT_DIR) \
+	-I$(PROJECT_DIR)/$(BUILD) \
+	-I$(LIBOGC_INC)
+
+
+# -----------------------------------------------------------------------------
 # Outer build
 # -----------------------------------------------------------------------------
 
@@ -178,12 +200,6 @@ export VPATH := \
 CPPFILES ?=
 sFILES   ?=
 SFILES   ?=
-
-export INCLUDE := \
-	$(foreach dir,$(APP_INCLUDES),-I$(dir)) \
-	-I$(PROJECT_DIR) \
-	-I$(PROJECT_DIR)/$(BUILD) \
-	-I$(LIBOGC_INC)
 
 export LIBPATHS := \
 	$(foreach dir,$(APP_LIBDIRS),-L$(dir)/lib) \

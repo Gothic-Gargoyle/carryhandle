@@ -10,6 +10,9 @@
 
 #include <gccore.h>
 #include <ogc/dvd.h>
+#include <fat.h>
+#include <gctypes.h>
+#include <sdcard/gcsd.h>
 #include <sys/iosupport.h>
 
 #include <sys/stat.h>
@@ -18,6 +21,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <limits.h>
+#include <stdio.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <malloc.h>
 #include <string.h>
@@ -57,6 +63,176 @@ static bool gc_fst_mounted;
 
 static uint8_t gc_dvd_bounce[CH_DVD_BOUNCE_SIZE]
     __attribute__((aligned(32)));
+
+/*
+ * CH_DVD_IMAGE_BACKING
+ *
+ * Swiss supplies libogc2 applications an external launch path in argv[0].
+ * If it names a GameCube image on a native SD interface, use that image as
+ * the backing store for the in-memory FST instead of the optical drive.
+ */
+static FILE *gc_dvd_image;
+static const char *gc_dvd_image_mount_name;
+static bool gc_dvd_image_mount_owned;
+
+enum {
+    CH_DVD_BACKING_PHYSICAL = 0,
+    CH_DVD_BACKING_IMAGE = 1,
+    CH_DVD_BACKING_ERROR = -1
+};
+
+static bool CH_DVD_PathLooksLikeImage(const char *path)
+{
+    const char *ext;
+
+    if (path == NULL)
+        return false;
+
+    ext = strrchr(path, '.');
+    if (ext == NULL)
+        return false;
+
+    return strcasecmp(ext, ".iso") == 0 ||
+        strcasecmp(ext, ".gcm") == 0;
+}
+
+static DISC_INTERFACE *CH_DVD_InterfaceForPath(
+    const char *path,
+    const char **mount_name)
+{
+    if (path == NULL || mount_name == NULL)
+        return NULL;
+
+    if (strncmp(path, "sd:/", 4) == 0) {
+        *mount_name = "sd";
+        return get_io_gcsd2();
+    }
+
+    if (strncmp(path, "carda:/", 7) == 0) {
+        *mount_name = "carda";
+        return get_io_gcsda();
+    }
+
+    if (strncmp(path, "cardb:/", 7) == 0) {
+        *mount_name = "cardb";
+        return get_io_gcsdb();
+    }
+
+    return NULL;
+}
+
+static void CH_DVD_CloseImageBacking(void)
+{
+    if (gc_dvd_image != NULL) {
+        fclose(gc_dvd_image);
+        gc_dvd_image = NULL;
+    }
+
+    if (gc_dvd_image_mount_owned &&
+        gc_dvd_image_mount_name != NULL) {
+        fatUnmount(gc_dvd_image_mount_name);
+    }
+
+    gc_dvd_image_mount_name = NULL;
+    gc_dvd_image_mount_owned = false;
+}
+
+static int CH_DVD_TryLaunchImage(void)
+{
+    const char *path;
+    const char *mount_name = NULL;
+    DISC_INTERFACE *iface;
+    char device_name[10];
+    uint8_t header[32];
+
+    if (__system_argv == NULL ||
+        __system_argv->argvMagic != ARGV_MAGIC ||
+        __system_argv->argc < 1 ||
+        __system_argv->argv == NULL ||
+        __system_argv->argv[0] == NULL) {
+        return CH_DVD_BACKING_PHYSICAL;
+    }
+
+    path = __system_argv->argv[0];
+
+    if (!CH_DVD_PathLooksLikeImage(path))
+        return CH_DVD_BACKING_PHYSICAL;
+
+    iface = CH_DVD_InterfaceForPath(path, &mount_name);
+
+    /*
+     * An image path on an unsupported source must fail closed. Falling
+     * through to physical DI would recreate the mixed-FST corruption bug.
+     */
+    if (iface == NULL || mount_name == NULL)
+        return CH_DVD_BACKING_ERROR;
+
+    snprintf(device_name, sizeof(device_name), "%s:", mount_name);
+
+    if (FindDevice(device_name) < 0) {
+        if (!fatMountSimple(mount_name, iface))
+            return CH_DVD_BACKING_ERROR;
+        gc_dvd_image_mount_owned = true;
+    }
+
+    gc_dvd_image_mount_name = mount_name;
+    gc_dvd_image = fopen(path, "rb");
+
+    if (gc_dvd_image == NULL) {
+        CH_DVD_CloseImageBacking();
+        return CH_DVD_BACKING_ERROR;
+    }
+
+    if (fread(header, 1, sizeof(header), gc_dvd_image) != sizeof(header)) {
+        CH_DVD_CloseImageBacking();
+        return CH_DVD_BACKING_ERROR;
+    }
+
+    /*
+     * Swiss copies the launched game's header to 0x80000000. Require the
+     * image's six-byte Game ID to match it, plus the GameCube disc magic.
+     */
+    if (memcmp(header, (const void *)(uintptr_t)0x80000000, 6) != 0 ||
+        header[0x1c] != 0xc2 ||
+        header[0x1d] != 0x33 ||
+        header[0x1e] != 0x9f ||
+        header[0x1f] != 0x3d) {
+        CH_DVD_CloseImageBacking();
+        return CH_DVD_BACKING_ERROR;
+    }
+
+    rewind(gc_dvd_image);
+    return CH_DVD_BACKING_IMAGE;
+}
+
+static s32 CH_DVD_ReadAbsBacking(
+    dvdcmdblk *block,
+    void *buf,
+    u32 len,
+    s64 offset,
+    s32 prio)
+{
+    size_t got;
+
+    if (gc_dvd_image == NULL)
+        return DVD_ReadAbsPrio(block, buf, len, offset, prio);
+
+    (void)block;
+    (void)prio;
+
+    if (offset < 0 || offset > LONG_MAX)
+        return -1;
+
+    if (fseek(gc_dvd_image, (long)offset, SEEK_SET) != 0)
+        return -1;
+
+    got = fread(buf, 1, len, gc_dvd_image);
+    if (got != len)
+        return -1;
+
+    return (s32)got;
+}
+
 
 
 
@@ -348,7 +524,7 @@ static ssize_t CH_DVD_Read(
         (amount & 31u) == 0 &&
         (((f->offset + f->pos) & 31u) == 0))
     {
-        rc = DVD_ReadAbsPrio(
+        rc = CH_DVD_ReadAbsBacking(
             &block,
             ptr,
             amount,
@@ -390,7 +566,7 @@ static ssize_t CH_DVD_Read(
             read_len =
                 (skip + chunk + 31u) & ~31u;
 
-            rc = DVD_ReadAbsPrio(
+            rc = CH_DVD_ReadAbsBacking(
                 &block,
                 gc_dvd_bounce,
                 read_len,
@@ -569,13 +745,17 @@ bool CH_DVDMount(void)
         ((size_t)gc_fst_count *
          CH_DVD_FST_ENTRY_SIZE);
 
-    DVD_Init();
+    {
+        int backing = CH_DVD_TryLaunchImage();
 
-    /*
-     * In Dolphin this is harmless; on real hardware this prepares
-     * the DVD subsystem for raw absolute reads.
-     */
-    DVD_Mount();
+        if (backing == CH_DVD_BACKING_ERROR)
+            return false;
+
+        if (backing == CH_DVD_BACKING_PHYSICAL) {
+            DVD_Init();
+            DVD_Mount();
+        }
+    }
 
     if (AddDevice(&gc_dvd_devoptab) < 0)
         return false;
@@ -592,6 +772,8 @@ void CH_DVDUnmount(void)
         return;
 
     RemoveDevice("dvd:");
+
+    CH_DVD_CloseImageBacking();
 
     gc_fst = NULL;
     gc_fst_strings = NULL;
