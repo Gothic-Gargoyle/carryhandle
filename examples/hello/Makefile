@@ -19,6 +19,9 @@ include $(DEVKITPRO)/libogc2/gamecube_rules
 
 TARGET   := hello
 BUILD    := build
+VERSION ?= dev
+
+RELEASE_DIST := $(PROJECT_DIR)/dist
 
 MANIFEST             := $(PROJECT_DIR)/carryhandle.cfg
 MANIFEST_TOOL        := $(CARRY_ROOT)/tools/ch_manifest.py
@@ -82,7 +85,7 @@ export LIBPATHS := \
     $(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
     -L$(LIBOGC_LIB)
 
-.PHONY: $(BUILD) clean
+.PHONY: $(BUILD) clean release-bundle
 
 $(BUILD): $(GENERATED_APP_HEADER) $(GENERATED_CARD_STAMP)
 	@mkdir -p $(PROJECT_DIR)/$(BUILD)
@@ -116,7 +119,21 @@ clean:
 	@rm -rf \
 		$(PROJECT_DIR)/$(BUILD) \
 		$(PROJECT_DIR)/$(TARGET).elf \
-		$(PROJECT_DIR)/$(TARGET).dol
+		$(PROJECT_DIR)/$(TARGET).dol \
+		$(RELEASE_DIST)
+
+# Standard CarryHandle consumer release hook.
+#
+# CarryHandle owns the outer release lifecycle. This consumer owns only
+# the contents of its release artifact.
+release-bundle: $(BUILD)
+	@mkdir -p "$(RELEASE_DIST)"
+	@cp "$(PROJECT_DIR)/$(TARGET).dol" \
+		"$(RELEASE_DIST)/$(TARGET)-v$(VERSION).dol"
+	@echo "Release artifact:"
+	@echo "  $(RELEASE_DIST)/$(TARGET)-v$(VERSION).dol"
+
+include $(CARRY_ROOT)/make/release.mk
 
 else
 

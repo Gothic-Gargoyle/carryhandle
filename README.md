@@ -368,26 +368,27 @@ submodule gitlink.
 
 ### Release publication
 
-CarryHandle can publish an **already-built, already-tested and already-tagged**
-consumer release to GitHub or GitLab. The consumer still owns how the release
-artifact is built, when it is accepted, the release notes, and creation/push of
-the Git tag.
+CarryHandle provides a common release lifecycle for consumer projects while
+leaving the contents of the player package application-specific.
 
-Publication support is opt-in:
+Release support is opt-in:
 
 ```make
 include $(CARRY_ROOT)/make/release.mk
 ```
 
-GitHub publication requires an authenticated `gh` CLI. GitLab publication
-requires an authenticated `glab` CLI.
+Every consumer that enables the release module provides a `release-bundle`
+target. That target owns the application's actual player packaging: which
+runtime files, executables, documentation, launchers, assets and other
+application-specific files belong in the release.
 
-A normal release flow is:
+CarryHandle owns the common outer workflow:
 
 ```bash
-make release
+make release RELEASE_TAG=v1.2.3
 # Test the artifact, including real hardware where relevant.
-# Create and push the release tag.
+
+make release-push RELEASE_TAG=v1.2.3
 
 make publish-release-check \
     RELEASE_TAG=v1.2.3 \
@@ -400,14 +401,24 @@ make publish-release \
     RELEASE_NOTES=release/v1.2.3.md
 ```
 
-Run the publication steps from the exact commit targeted by the release tag.
-`publish-release-check` is read-only. `publish-release` refuses to update an
-existing release and verifies the published assets by downloading them again
-and comparing their SHA-256 hashes.
+`make release` validates the prospective tag, performs a clean consumer
+release build through `release-bundle`, and creates an annotated local tag only
+after packaging succeeds. A failed package therefore does not leave a release
+tag behind.
 
-See [TECHNICAL.md](TECHNICAL.md) for the complete publication safety contract,
-provider behavior, release-time variables, dirty-tree policy, verification
-rules and failure modes.
+`make release-push` verifies that the local tag resolves to the current branch
+HEAD and atomically pushes the branch and tag to the selected Git remote.
+
+Publication remains a separate operation. `publish-release-check` is
+read-only. `publish-release` refuses to update an existing release and verifies
+published assets by downloading them again and comparing their SHA-256 hashes.
+
+GitHub publication requires an authenticated `gh` CLI. GitLab publication
+requires an authenticated `glab` CLI.
+
+See [TECHNICAL.md](TECHNICAL.md) for the complete release and publication
+safety contract, consumer hook, provider behavior, release-time variables,
+dirty-tree policy, verification rules and failure modes.
 
 ## Platform
 

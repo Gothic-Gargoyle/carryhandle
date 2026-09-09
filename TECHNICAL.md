@@ -338,35 +338,45 @@ published-asset verification
 The corresponding conventional commands are:
 
 ```text
-make release
+make release RELEASE_TAG=vX.Y.Z
 [human / emulator / hardware acceptance]
-[create and push release tag]
+make release-push RELEASE_TAG=vX.Y.Z
 make publish-release-check
 make publish-release
 ```
 
-`make release` is not defined by CarryHandle's publication layer. It remains an
-application-owned target because different consumers package different runtime
-files, assets, documentation and player tooling.
+CarryHandle defines the generic `make release` orchestration. The consumer
+supplies the application-specific `release-bundle` target that actually creates
+its player artifact.
+
+This keeps one public release workflow across DoomCube, Quake-family ports,
+Half-Life ports and future CarryHandle consumers without requiring CarryHandle
+to know the contents of any particular game's release package.
 
 #### Ownership boundary
 
 The consumer owns:
 
 ```text
-release build/package procedure
+release-bundle implementation
 artifact contents
-decision that the artifact is accepted
+application-specific build/package variables
+decision that the produced artifact is accepted
 release notes content
 optional release title override
-release tag creation
-release tag push
 bundle README and other application-specific prose
 ```
 
 CarryHandle owns:
 
 ```text
+prospective release-tag validation
+clean tracked-source preflight
+clean-build/package orchestration
+VERSION derivation from RELEASE_TAG
+annotated local-tag creation after successful packaging
+release branch/tag push preflight
+atomic branch + tag push
 publication preflight
 source / local-tag / remote-tag consistency checks
 forge provider selection
@@ -378,8 +388,21 @@ fresh download of every published asset
 SHA-256 comparison against the accepted local assets
 ```
 
-CarryHandle publication never treats "build", "tag" and "publish" as one
-automatic transaction. Those are intentionally separate trust boundaries.
+The release lifecycle deliberately retains explicit trust boundaries:
+
+```text
+local package + local tag
+        ↓
+human / emulator / hardware acceptance
+        ↓
+remote branch + tag push
+        ↓
+forge publication
+```
+
+`make release` never pushes or publishes. `make release-push` never creates a
+forge release. `make publish-release` never builds the consumer or creates or
+moves Git tags.
 
 #### Release metadata is invocation-time state
 
@@ -394,7 +417,7 @@ The Make interface accepts:
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `RELEASE_TAG` | yes | Already-existing local and remote release tag |
+| `RELEASE_TAG` | yes | Prospective tag for `release`; local tag for `release-push`; existing local and remote tag for publication |
 | `RELEASE_ASSETS` | yes | Space-separated local artifact paths |
 | `RELEASE_NOTES` | yes | Non-empty Markdown/text release-notes file |
 | `RELEASE_TITLE` | no | Release title override |
@@ -718,6 +741,21 @@ acceptance before publication, not after it.
 
 #### Current validation status
 
+The generic local release lifecycle has been exercised with disposable
+consumers.
+
+Validated behavior includes:
+
+```text
+failed release-bundle -> release fails and no tag is created
+successful release-bundle -> annotated tag is created afterward
+RELEASE_TAG=vX.Y.Z -> VERSION=X.Y.Z reaches the consumer hook
+created tag -> exact release HEAD
+release-push -> atomic branch + annotated-tag push
+remote branch -> exact release HEAD
+remote tag -> exact release HEAD
+```
+
 The publication layer has been exercised at several levels.
 
 Host/fake-provider proof covers:
@@ -748,6 +786,10 @@ release ZIP while provider mutation was redirected to a fake forge CLI.
 
 Real GitHub access has proven that an already-existing DoomCube release is
 detected and refused without changing its before/after release metadata.
+
+A disposable private GitHub consumer has also proven the new-release path
+end to end through `make publish-release`: release creation, asset upload,
+fresh download, and SHA-256 equality against the accepted local asset.
 
 At the time this contract was written:
 
