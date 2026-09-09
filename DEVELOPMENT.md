@@ -207,6 +207,19 @@ Real-hardware-sensitive behavior such as DVD alignment, cache management,
 video presentation, controller operation, rumble, and Memory Card access
 requires hardware validation when a change can affect it.
 
+CarryHandle's Swiss-launched image-backed DVD path and native disc
+presentation generation have been validated through DoomCube on a real
+Nintendo GameCube using:
+
+```text
+PicoLoader -> Swiss -> SD Gecko -> DoomCube .iso
+```
+
+That proof covers the Swiss-launched `.iso` path from SD, including image-backed
+game-data reads and generated disc presentation. It does not by itself establish
+support for burned optical discs, other ODEs/loaders, other Swiss storage
+devices, direct-DOL launch behavior, or real-hardware Memory Card writes.
+
 ### Developing against a local CarryHandle checkout
 
 A consumer normally uses its pinned `deps/carryhandle` submodule.

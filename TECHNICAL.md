@@ -127,8 +127,23 @@ does not parse the INI file at runtime.
 `tools/ch_manifest.py` validates the manifest and can generate immutable
 application metadata consumed by `CH_ApplicationInfo`.
 
-Manifest version 3 deliberately separates the application's Memory Card
-identity from its GameCube disc identity:
+Manifest version 4 separates four concepts:
+
+```text
+[application]
+    machine identity and native disc identity
+
+[presentation]
+    human-facing application/disc presentation
+
+[persistence]
+    persistent-storage namespace
+
+[memcard]
+    optional physical Memory Card policy and presentation overrides
+```
+
+The machine-identity fields remain distinct:
 
 ```text
 game_code
@@ -156,7 +171,7 @@ The native six-byte GameCube disc ID is derived as:
 + company_code
 ```
 
-The disc-region mapping is:
+with the region character:
 
 ```text
 NTSC-J -> J
@@ -164,12 +179,61 @@ NTSC-U -> E
 PAL    -> P
 ```
 
-The same validated manifest supplies the human-readable disc title and the BI2
-region value.
+This separation is intentional. Memory Card identity, disc identity,
+presentation, and persistence are different concepts and must not be conflated.
 
-This separation is intentional. Memory Card identity and disc identity are
-different concepts and must not be conflated merely because both contain game
-and company identifiers.
+### Presentation metadata
+
+Manifest v4 adds build-time `[presentation]` metadata:
+
+```text
+banner
+    manifest-relative 96x32 PNG source
+
+company
+    human-facing company name
+
+description
+    human-facing application description
+```
+
+Presentation metadata is host/build metadata rather than generated runtime C
+state.
+
+For native GameCube images, `make/image.mk` invokes
+`tools/native-gcm/ch_bnr.py` before the GCM builder walks the staged disc root.
+The generated file is:
+
+```text
+opening.bnr
+```
+
+at the root of the native GameCube image.
+
+The current disc encoder is deliberately strict and deterministic:
+
+```text
+format          BNR1
+banner source   exactly 96x32
+resizing        none
+image encoding  tiled opaque RGB5A3
+metadata        fixed-size NUL-padded ASCII fields
+```
+
+BNR2/localized metadata is deferred.
+
+The same 96x32 source banner may also be used for Memory Card presentation, but
+disc and Memory Card encoders remain separate because the on-card banner uses a
+different CI8 + RGB5A3-palette representation.
+
+Manifest v4 makes `[memcard]` optional. When it is present, `filename`,
+`sectors`, and a 32x32 `icon` are required. Optional card-specific `title`,
+`comment`, and `banner` values override defaults inherited from
+`application.name`, `presentation.description`, and `presentation.banner`
+respectively.
+
+Manifest versions 1 through 3 retain their previous strict compatibility
+behavior.
 
 ### Shared Make fragments
 
@@ -192,6 +256,7 @@ make/gamecube.mk
 make/image.mk
     native GameCube GCM/FST packaging
     manifest-driven disc identity
+    manifest-driven BNR1 presentation generation
 
 make/dolphin.mk
     launch of an existing image
@@ -222,6 +287,7 @@ CarryHandle provides:
 apploader
 native GCM/FST builder
 manifest validation
+BNR1 presentation encoder
 shared image Make rules
 ```
 

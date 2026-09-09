@@ -136,6 +136,10 @@ The canonical layout is:
 
 ```text
 mygame/
+├── assets/
+│   └── presentation/
+│       ├── banner.png
+│       └── card-icon.png
 ├── carryhandle.cfg
 ├── deps/
 │   └── carryhandle/
@@ -163,11 +167,12 @@ required.
 Applications using CarryHandle's shared application and image tooling provide
 a project-level `carryhandle.cfg`.
 
-Manifest version 3 separates Memory Card identity from GameCube disc identity:
+Manifest version 4 separates machine identity, human-facing presentation,
+persistent-storage identity, and optional Memory Card policy:
 
 ```ini
 [carryhandle]
-manifest_version = 3
+manifest_version = 4
 
 [application]
 name = My Game
@@ -176,28 +181,47 @@ disc_game_id = MG
 company_code = CH
 region = PAL
 
+[presentation]
+banner = assets/presentation/banner.png
+company = My Studio
+description = My Game for Nintendo GameCube
+
 [persistence]
 store_id = my-game
+
+[memcard]
+filename = MYGAME
+sectors = 8
+icon = assets/presentation/card-icon.png
 ```
 
-The identity fields are:
+The sections have deliberately different ownership:
+
+| Section | Purpose |
+| --- | --- |
+| `[application]` | Machine identity and disc identity |
+| `[presentation]` | Human-facing disc/application presentation |
+| `[persistence]` | CarryHandle persistent-storage namespace |
+| `[memcard]` | Optional physical Memory Card policy and overrides |
+
+The main identity fields are:
 
 | Field | Purpose |
 | --- | --- |
-| `name` | Human-readable application and disc title |
+| `name` | Human-readable application name; max 31 ASCII bytes in v4 |
 | `game_code` | Exactly 4 ASCII bytes; application/Memory Card game code |
 | `disc_game_id` | Exactly 2 ASCII bytes; GameCube disc game identifier |
 | `company_code` | Exactly 2 ASCII bytes; maker/company identity |
 | `region` | `NTSC-J`, `NTSC-U`, or `PAL` |
 | `store_id` | CarryHandle persistence namespace |
 
-The six-byte GameCube disc ID is constructed as:
+The six-byte native GameCube disc ID remains:
 
 ```text
 G + disc_game_id + region character + company_code
 ```
 
-The region characters are:
+with the region character:
 
 ```text
 NTSC-J -> J
@@ -205,9 +229,68 @@ NTSC-U -> E
 PAL    -> P
 ```
 
-`game_code` and `disc_game_id` are deliberately separate. Existing
+`company_code` is the two-byte machine identity used in native GameCube
+metadata. It is deliberately separate from `presentation.company`, which is
+human-facing text shown in presentation metadata such as `opening.bnr`.
+
+Presentation v4 requires:
+
+```text
+banner
+    manifest-relative PNG path
+    exactly 96x32 pixels
+    no automatic resize or crop
+
+company
+    human-readable company name
+    max 31 ASCII bytes
+
+description
+    human-readable description
+    max 127 ASCII bytes
+```
+
+For native GameCube images CarryHandle converts the presentation banner into a
+root-level `opening.bnr`. The current encoder produces deterministic BNR1
+presentation data. BNR2/localized metadata is not currently generated.
+
+`[presentation]` does **not** imply Memory Card usage. Applications which do not
+use CarryHandle's Memory Card policy may omit `[memcard]` entirely.
+
+When `[memcard]` is present, v4 requires `filename`, `sectors`, and a 32x32
+`icon`. Card-specific presentation values are optional overrides:
+
+```text
+title
+    defaults to application.name
+
+comment
+    defaults to presentation.description
+
+banner
+    defaults to presentation.banner
+```
+
+The canonical source-asset layout is:
+
+```text
+assets/presentation/banner.png
+assets/presentation/card-icon.png
+```
+
+CarryHandle does not silently resize presentation art. A disc/card banner must
+be exactly 96x32 pixels and a card icon exactly 32x32 pixels.
+
+The `examples/hello/assets/presentation/` directory contains CarryHandle-branded
+96x32 banner and 32x32 card-icon placeholder assets. They can be copied as a
+starting point and replaced with application artwork.
+
+`game_code` and `disc_game_id` remain deliberately separate. Existing
 applications should preserve their Memory Card game/company identity so that
 existing card data remains accessible.
+
+Manifest versions 1 through 3 remain supported for existing consumers with
+their previous strict behavior. New consumers should use manifest version 4.
 
 Validate a manifest with:
 
