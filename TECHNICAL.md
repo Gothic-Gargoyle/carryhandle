@@ -313,6 +313,455 @@ override `CARRY_ROOT` explicitly when testing a separate CarryHandle checkout.
 A consumer must not depend on a sibling `../carryhandle` checkout as its normal
 build configuration.
 
+
+### Release publication
+
+Release publication is a host-side service. It is deliberately separated from
+consumer build/package logic and from `carryhandle.cfg`.
+
+The intended flow is:
+
+```text
+consumer build/package
+        ↓
+artifact acceptance
+        ↓
+tag creation + push
+        ↓
+CarryHandle publication preflight
+        ↓
+CarryHandle forge publication
+        ↓
+published-asset verification
+```
+
+The corresponding conventional commands are:
+
+```text
+make release
+[human / emulator / hardware acceptance]
+[create and push release tag]
+make publish-release-check
+make publish-release
+```
+
+`make release` is not defined by CarryHandle's publication layer. It remains an
+application-owned target because different consumers package different runtime
+files, assets, documentation and player tooling.
+
+#### Ownership boundary
+
+The consumer owns:
+
+```text
+release build/package procedure
+artifact contents
+decision that the artifact is accepted
+release notes content
+optional release title override
+release tag creation
+release tag push
+bundle README and other application-specific prose
+```
+
+CarryHandle owns:
+
+```text
+publication preflight
+source / local-tag / remote-tag consistency checks
+forge provider selection
+provider authentication/access checks at publication time
+existing-release refusal
+upload of explicitly supplied assets
+post-publication metadata verification
+fresh download of every published asset
+SHA-256 comparison against the accepted local assets
+```
+
+CarryHandle publication never treats "build", "tag" and "publish" as one
+automatic transaction. Those are intentionally separate trust boundaries.
+
+#### Release metadata is invocation-time state
+
+Release-publication values do **not** belong in `carryhandle.cfg`.
+
+The application manifest describes persistent application/build identity such
+as disc identity, presentation metadata and persistence identity. A particular
+release tag, release-notes file or distribution archive is temporary
+release-operation state.
+
+The Make interface accepts:
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `RELEASE_TAG` | yes | Already-existing local and remote release tag |
+| `RELEASE_ASSETS` | yes | Space-separated local artifact paths |
+| `RELEASE_NOTES` | yes | Non-empty Markdown/text release-notes file |
+| `RELEASE_TITLE` | no | Release title override |
+| `RELEASE_PROVIDER` | no | `auto`, `github`, or `gitlab`; default `auto` |
+| `RELEASE_REMOTE` | no | Git remote containing the release tag; default `origin` |
+| `RELEASE_ALLOW_DIRTY` | no | Space-separated tracked paths explicitly permitted to be unstaged and dirty |
+
+The direct host tool exposes the same values through `ch_release.py` options.
+Assets and allowed-dirty paths are repeatable command-line options.
+
+When no release title is supplied, the default is:
+
+```text
+<application.name> <tag>
+```
+
+where the application name is read from the already-existing
+`carryhandle.cfg`.
+
+#### Publication preflight
+
+`make publish-release-check` invokes:
+
+```text
+ch_release.py check
+```
+
+and performs no forge mutation.
+
+The preflight verifies all release inputs before publication is allowed.
+
+The important invariants are:
+
+```text
+consumer path is a Git working tree
+
+release notes exist and are non-empty
+
+at least one release asset exists
+asset basenames are unique
+
+staged source changes are forbidden
+
+unstaged tracked changes are forbidden
+unless each path was explicitly allowed
+
+local release tag exists
+local release tag resolves to HEAD
+
+remote release tag exists
+remote release tag resolves to the same HEAD
+
+remote URL resolves to a repository and forge host
+
+provider is known or was explicitly selected
+```
+
+Both annotated and lightweight Git tags are accepted. For an annotated tag,
+CarryHandle compares the peeled commit target rather than the tag object's own
+object ID.
+
+The central source invariant is:
+
+```text
+HEAD
+  ==
+local release tag target
+  ==
+remote release tag target
+```
+
+A consumer may continue development after a release. In that case the current
+development branch will no longer pass preflight for the older release tag.
+To inspect or reproduce the older release, check out that release commit/tag
+rather than weakening the invariant.
+
+#### Working-tree policy
+
+Publication source checks distinguish staged, tracked-unstaged and untracked
+state.
+
+```text
+staged tracked changes
+    always forbidden
+
+unstaged tracked changes
+    forbidden by default
+    may be allowed path-by-path with RELEASE_ALLOW_DIRTY
+
+untracked files
+    do not block publication
+```
+
+The allow-list exists for deliberate local tracked differences whose presence
+does not change the accepted tagged artifact. It is explicit rather than
+pattern-based so accidental source dirt remains fail-closed.
+
+The release tag still must target `HEAD` even when an allowed dirty path is
+present.
+
+#### Provider selection
+
+With:
+
+```text
+RELEASE_PROVIDER=auto
+```
+
+CarryHandle auto-detects the public hosted forges:
+
+```text
+github.com -> github
+gitlab.com -> gitlab
+```
+
+Unknown/self-hosted hosts are not guessed. They require an explicit provider
+selection.
+
+Explicit selection chooses the provider implementation; it does not waive
+source/tag/asset checks.
+
+Publication requires the matching authenticated forge CLI:
+
+```text
+GitHub -> gh
+GitLab -> glab
+```
+
+The read-only `publish-release-check` command does not require provider
+publication authentication because it does not call the mutation provider.
+
+#### Existing releases are immutable to this workflow
+
+Before creating anything remotely, the provider checks whether a release for
+the requested tag already exists.
+
+If it exists:
+
+```text
+REFUSE
+```
+
+CarryHandle does not:
+
+```text
+update it
+replace its notes
+replace an asset
+delete it
+recreate it
+```
+
+This makes publication intentionally one-shot. A previously published release
+must be handled manually if an operator deliberately wants to change it.
+
+#### GitHub publication
+
+The GitHub provider verifies authenticated access to the exact resolved
+repository and checks release absence before creation.
+
+Creation uses the equivalent of:
+
+```text
+gh release create <tag> <explicit-assets...> \
+    --title <title> \
+    --notes-file <notes> \
+    --verify-tag
+```
+
+`--verify-tag` is a critical invariant. CarryHandle will not allow the GitHub
+release command to manufacture a missing tag after preflight.
+
+After creation CarryHandle reads the release back and verifies:
+
+```text
+tag name
+release title
+not draft
+not prerelease
+release notes
+exact asset-name set
+asset sizes
+```
+
+Every requested asset is then downloaded into a fresh temporary directory and
+its byte length and SHA-256 digest are compared with the accepted local asset.
+
+#### GitLab publication
+
+The GitLab provider deliberately does **not** use `glab release create` for the
+creation step.
+
+Instead it performs a Releases API `POST` through `glab api` containing:
+
+```text
+name
+tag_name
+description
+```
+
+and deliberately omits:
+
+```text
+ref
+```
+
+That distinction is intentional. A GitLab release create operation can create
+a missing tag when given a reference. CarryHandle has already verified that
+the requested tag exists remotely and does not grant the provider permission
+to create one. If the tag disappears between preflight and release creation,
+the API request should therefore fail rather than silently creating another
+tag.
+
+After the release exists, only the explicitly supplied files are uploaded with
+the GitLab release upload path.
+
+CarryHandle then reads the release back and verifies:
+
+```text
+tag name
+release title
+release notes
+exact asset-name set
+```
+
+Every requested asset is downloaded freshly and its byte length and SHA-256
+digest are compared with the accepted local asset.
+
+#### Explicit-assets-only rule
+
+CarryHandle publishes only paths passed through `RELEASE_ASSETS` / `--asset`.
+
+It does not scan `dist/`, infer archive names, add checksums, add source
+archives, or upload other nearby files automatically.
+
+Asset basenames must be unique so the remote asset set can be compared
+unambiguously with the accepted local set.
+
+#### Published-asset verification
+
+A successful provider upload is not considered sufficient proof.
+
+For every asset CarryHandle records before publication:
+
+```text
+basename
+byte length
+SHA-256
+```
+
+After publication it fetches provider metadata and then downloads each asset
+again into a newly created temporary directory.
+
+Acceptance requires:
+
+```text
+published asset name == expected asset name
+published/downloaded byte length == accepted local byte length
+SHA256(freshly downloaded bytes) == SHA256(accepted local bytes)
+```
+
+The successful command therefore means:
+
+```text
+Publication: PERFORMED AND VERIFIED
+```
+
+rather than merely "the upload command exited zero."
+
+#### Partial failures and rollback
+
+Remote publication is irreversible enough that CarryHandle does not attempt
+automatic destructive rollback.
+
+A failure can occur after the release has been created, for example during:
+
+```text
+asset upload
+metadata verification
+fresh download
+hash verification
+```
+
+If that happens, CarryHandle reports failure and leaves the remote state for
+human inspection.
+
+It does **not** automatically delete the release or uploaded assets.
+
+Because the normal workflow refuses an existing release, blindly re-running
+the publication command after a partial mutation is also intentionally not a
+recovery strategy. Inspect the forge state first.
+
+This conservative behavior avoids turning an uncertain partial failure into an
+automatic delete/recreate cycle.
+
+#### What publication does not do
+
+`publish-release` does not:
+
+```text
+build the consumer
+run make release
+run make clean
+force a rebuild
+decide that an artifact passed testing
+create a Git commit
+create a Git tag
+move a Git tag
+push a Git tag
+modify carryhandle.cfg
+invent release notes
+invent project-specific release prose
+overwrite an existing forge release
+```
+
+The release artifact should already have been tested before publication is
+attempted.
+
+Hardware-sensitive applications should perform their relevant real-hardware
+acceptance before publication, not after it.
+
+#### Current validation status
+
+The publication layer has been exercised at several levels.
+
+Host/fake-provider proof covers:
+
+```text
+GitHub successful create path
+GitHub metadata verification
+GitHub fresh-download SHA-256 verification
+GitHub existing-release refusal
+
+GitLab successful create path
+GitLab metadata verification
+GitLab fresh-download SHA-256 verification
+GitLab existing-release refusal
+GitLab creation without glab release create
+GitLab API creation without ref
+```
+
+The user-facing Make integration has also been exercised end to end through:
+
+```text
+make publish-release-check
+make publish-release
+```
+
+using an exact detached DoomCube release checkout and the accepted DoomCube
+release ZIP while provider mutation was redirected to a fake forge CLI.
+
+Real GitHub access has proven that an already-existing DoomCube release is
+detected and refused without changing its before/after release metadata.
+
+At the time this contract was written:
+
+```text
+GitHub creation of a brand-new disposable real release
+    not yet live-proven by this workflow
+
+GitLab real mutation
+    not yet live-proven by this workflow
+```
+
+Those limitations should not be silently promoted into stronger claims until a
+deliberate disposable live-publication test proves them.
+
 ## Public API
 
 All public CarryHandle symbols use the `CH_` namespace.
