@@ -7,15 +7,15 @@
 #   - release notes content
 #   - release tag creation
 #
-# CarryHandle owns generic publication preflight mechanics.
+# CarryHandle owns generic release-publication mechanics:
+#   make publish-release-check  -> validate without publishing
+#   make publish-release        -> publish and verify remote assets
 #
 # carryhandle.cfg remains application/build metadata. Release-specific values
 # are supplied here/invocation-time and are not stored in the manifest.
 #
-# First slice:
-#   make publish-release-check
-#
-# No remote release publication target is provided yet.
+# Publication is deliberately separate from consumer build/package logic and
+# from Git tag creation/push. Existing releases are never updated in place.
 # -----------------------------------------------------------------------------
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
