@@ -33,6 +33,11 @@ import runpy
 import subprocess
 import sys
 from urllib.parse import urlparse
+import os
+import shlex
+import shutil
+import tempfile
+import urllib.parse
 
 
 class ReleaseError(RuntimeError):
@@ -474,6 +479,800 @@ def build_plan(args: argparse.Namespace) -> dict:
     }
 
 
+
+# CARRYHANDLE_RELEASE_PROVIDERS_V1
+#
+# Publication deliberately remains separate from build/tag creation.
+# build_plan() is always run first, so publication inherits the exact same
+# source/tag/asset checks as the read-only `check` command.
+
+
+def run_cli(
+    command: list[str],
+    *,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    merged_env = None
+
+    if env is not None:
+        merged_env = dict(os.environ)
+        merged_env.update(env)
+
+    proc = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=merged_env,
+    )
+
+    if check and proc.returncode != 0:
+        detail = (
+            proc.stderr.strip()
+            or proc.stdout.strip()
+            or f"exit status {proc.returncode}"
+        )
+
+        raise ReleaseError(
+            "command failed: "
+            + shlex.join(command)
+            + "\n"
+            + detail
+        )
+
+    return proc
+
+
+def parse_json_output(
+    proc: subprocess.CompletedProcess[str],
+    context: str,
+) -> dict:
+    try:
+        value = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise ReleaseError(
+            f"{context} did not return valid JSON"
+        ) from exc
+
+    if not isinstance(value, dict):
+        raise ReleaseError(
+            f"{context} returned unexpected JSON"
+        )
+
+    return value
+
+
+def plan_notes_path(
+    args: argparse.Namespace,
+) -> Path:
+    repo = Path(args.repo).expanduser().resolve()
+    return resolve_input_path(repo, args.notes)
+
+
+def expected_asset_map(plan: dict) -> dict[str, dict]:
+    return {
+        asset["name"]: asset
+        for asset in plan["assets"]
+    }
+
+
+class ReleaseProvider:
+    cli_name = ""
+
+    def __init__(
+        self,
+        plan: dict,
+    ) -> None:
+        self.plan = plan
+        self.host = plan["remote_host"]
+        self.repository = plan["repository"]
+        self.tag = plan["tag"]
+        self.title = plan["title"]
+
+    def require_cli(self) -> None:
+        if not shutil.which(self.cli_name):
+            raise ReleaseError(
+                f"required provider CLI is not installed: "
+                f"{self.cli_name}"
+            )
+
+    def verify_auth(self) -> None:
+        raise NotImplementedError
+
+    def verify_project_access(self) -> None:
+        raise NotImplementedError
+
+    def release_exists(self) -> bool:
+        raise NotImplementedError
+
+    def create_release(
+        self,
+        notes: Path,
+    ) -> None:
+        raise NotImplementedError
+
+    def verify_release(
+        self,
+        notes: Path,
+    ) -> dict:
+        raise NotImplementedError
+
+    def download_asset(
+        self,
+        asset: dict,
+        destination: Path,
+    ) -> Path:
+        raise NotImplementedError
+
+    def publish(
+        self,
+        notes: Path,
+    ) -> dict:
+        self.require_cli()
+        self.verify_auth()
+        self.verify_project_access()
+
+        if self.release_exists():
+            raise ReleaseError(
+                f"{self.plan['provider']} release already exists "
+                f"for tag {self.tag}; refusing to update or overwrite it"
+            )
+
+        self.create_release(notes)
+
+        metadata = self.verify_release(notes)
+
+        verified_assets = []
+
+        with tempfile.TemporaryDirectory(
+            prefix="carryhandle-release-verify-"
+        ) as temp_name:
+            temp = Path(temp_name)
+
+            for asset in self.plan["assets"]:
+                asset_dir = temp / asset["name"]
+                asset_dir.mkdir()
+
+                downloaded = self.download_asset(
+                    asset,
+                    asset_dir,
+                )
+
+                if downloaded.name != asset["name"]:
+                    raise ReleaseError(
+                        "downloaded asset basename mismatch: "
+                        f"expected {asset['name']}, "
+                        f"got {downloaded.name}"
+                    )
+
+                actual_size = downloaded.stat().st_size
+
+                if actual_size != asset["bytes"]:
+                    raise ReleaseError(
+                        f"published asset size mismatch for "
+                        f"{asset['name']}: expected "
+                        f"{asset['bytes']}, got {actual_size}"
+                    )
+
+                actual_sha = sha256_file(downloaded)
+
+                if actual_sha != asset["sha256"]:
+                    raise ReleaseError(
+                        f"published asset SHA256 mismatch for "
+                        f"{asset['name']}:\n"
+                        f"  expected: {asset['sha256']}\n"
+                        f"  actual:   {actual_sha}"
+                    )
+
+                verified_assets.append(
+                    {
+                        "name": asset["name"],
+                        "bytes": actual_size,
+                        "sha256": actual_sha,
+                    }
+                )
+
+        return {
+            "provider": self.plan["provider"],
+            "repository": self.repository,
+            "tag": self.tag,
+            "title": self.title,
+            "url": metadata.get("url", ""),
+            "assets": verified_assets,
+        }
+
+
+class GitHubProvider(ReleaseProvider):
+    cli_name = "gh"
+
+    @property
+    def repo_target(self) -> str:
+        if self.host == "github.com":
+            return self.repository
+
+        return f"{self.host}/{self.repository}"
+
+    def verify_auth(self) -> None:
+        run_cli(
+            [
+                "gh",
+                "auth",
+                "status",
+                "--hostname",
+                self.host,
+            ]
+        )
+
+    def verify_project_access(self) -> None:
+        proc = run_cli(
+            [
+                "gh",
+                "repo",
+                "view",
+                self.repo_target,
+                "--json",
+                "nameWithOwner",
+            ]
+        )
+
+        data = parse_json_output(
+            proc,
+            "GitHub repository lookup",
+        )
+
+        actual = data.get("nameWithOwner")
+
+        if (
+            not isinstance(actual, str)
+            or actual.casefold()
+            != self.repository.casefold()
+        ):
+            raise ReleaseError(
+                "GitHub repository lookup resolved an unexpected "
+                f"repository: {actual!r}"
+            )
+
+    def release_exists(self) -> bool:
+        encoded_tag = urllib.parse.quote(
+            self.tag,
+            safe="",
+        )
+
+        proc = run_cli(
+            [
+                "gh",
+                "api",
+                "--hostname",
+                self.host,
+                f"repos/{self.repository}/releases/tags/"
+                f"{encoded_tag}",
+            ],
+            check=False,
+        )
+
+        if proc.returncode == 0:
+            return True
+
+        detail = (
+            proc.stderr
+            + "\n"
+            + proc.stdout
+        )
+
+        if "HTTP 404" in detail:
+            return False
+
+        raise ReleaseError(
+            "could not determine whether the GitHub release "
+            f"already exists:\n{detail.strip()}"
+        )
+
+    def create_release(
+        self,
+        notes: Path,
+    ) -> None:
+        command = [
+            "gh",
+            "release",
+            "create",
+            self.tag,
+        ]
+
+        command.extend(
+            asset["path"]
+            for asset in self.plan["assets"]
+        )
+
+        command.extend(
+            [
+                "--repo",
+                self.repo_target,
+                "--title",
+                self.title,
+                "--notes-file",
+                str(notes),
+                "--verify-tag",
+            ]
+        )
+
+        run_cli(command)
+
+    def verify_release(
+        self,
+        notes: Path,
+    ) -> dict:
+        proc = run_cli(
+            [
+                "gh",
+                "release",
+                "view",
+                self.tag,
+                "--repo",
+                self.repo_target,
+                "--json",
+                (
+                    "tagName,name,isDraft,isPrerelease,"
+                    "body,assets,url"
+                ),
+            ]
+        )
+
+        data = parse_json_output(
+            proc,
+            "GitHub release lookup",
+        )
+
+        if data.get("tagName") != self.tag:
+            raise ReleaseError(
+                "GitHub release tag does not match the requested tag"
+            )
+
+        if data.get("name") != self.title:
+            raise ReleaseError(
+                "GitHub release title does not match the requested title"
+            )
+
+        if data.get("isDraft") is not False:
+            raise ReleaseError(
+                "GitHub release unexpectedly remains a draft"
+            )
+
+        if data.get("isPrerelease") is not False:
+            raise ReleaseError(
+                "GitHub release unexpectedly became a prerelease"
+            )
+
+        expected_notes = notes.read_text(
+            encoding="utf-8"
+        ).rstrip("\r\n")
+        actual_notes = str(
+            data.get("body", "")
+        ).rstrip("\r\n")
+
+        if actual_notes != expected_notes:
+            raise ReleaseError(
+                "GitHub release notes do not match the requested notes file"
+            )
+
+        remote_assets = data.get("assets")
+
+        if not isinstance(remote_assets, list):
+            raise ReleaseError(
+                "GitHub release returned invalid asset metadata"
+            )
+
+        actual = {}
+
+        for item in remote_assets:
+            if not isinstance(item, dict):
+                raise ReleaseError(
+                    "GitHub release returned invalid asset metadata"
+                )
+
+            name = item.get("name")
+            size = item.get("size")
+
+            if not isinstance(name, str):
+                raise ReleaseError(
+                    "GitHub release asset has no valid name"
+                )
+
+            actual[name] = size
+
+        expected = expected_asset_map(self.plan)
+
+        if set(actual) != set(expected):
+            raise ReleaseError(
+                "GitHub release asset names differ from the "
+                "explicitly supplied asset set"
+            )
+
+        for name, asset in expected.items():
+            if actual[name] != asset["bytes"]:
+                raise ReleaseError(
+                    f"GitHub release asset size mismatch for {name}"
+                )
+
+        return data
+
+    def download_asset(
+        self,
+        asset: dict,
+        destination: Path,
+    ) -> Path:
+        run_cli(
+            [
+                "gh",
+                "release",
+                "download",
+                self.tag,
+                "--repo",
+                self.repo_target,
+                "--dir",
+                str(destination),
+                "--pattern",
+                asset["name"],
+            ]
+        )
+
+        files = [
+            candidate
+            for candidate in destination.iterdir()
+            if candidate.is_file()
+        ]
+
+        if (
+            len(files) != 1
+            or files[0].name != asset["name"]
+        ):
+            raise ReleaseError(
+                "GitHub release download did not produce exactly "
+                f"the requested asset {asset['name']}"
+            )
+
+        return files[0]
+
+
+class GitLabProvider(ReleaseProvider):
+    cli_name = "glab"
+
+    @property
+    def environment(self) -> dict[str, str]:
+        return {
+            "GITLAB_HOST": self.host,
+        }
+
+    @property
+    def encoded_project(self) -> str:
+        return urllib.parse.quote(
+            self.repository,
+            safe="",
+        )
+
+    @property
+    def encoded_tag(self) -> str:
+        return urllib.parse.quote(
+            self.tag,
+            safe="",
+        )
+
+    @property
+    def release_endpoint(self) -> str:
+        return (
+            f"projects/{self.encoded_project}/releases/"
+            f"{self.encoded_tag}"
+        )
+
+    def verify_auth(self) -> None:
+        run_cli(
+            [
+                "glab",
+                "auth",
+                "status",
+                "--hostname",
+                self.host,
+            ],
+            env=self.environment,
+        )
+
+    def verify_project_access(self) -> None:
+        proc = run_cli(
+            [
+                "glab",
+                "api",
+                f"projects/{self.encoded_project}",
+            ],
+            env=self.environment,
+        )
+
+        data = parse_json_output(
+            proc,
+            "GitLab repository lookup",
+        )
+
+        actual = data.get("path_with_namespace")
+
+        if actual != self.repository:
+            raise ReleaseError(
+                "GitLab repository lookup resolved an unexpected "
+                f"repository: {actual!r}"
+            )
+
+    def release_exists(self) -> bool:
+        proc = run_cli(
+            [
+                "glab",
+                "api",
+                self.release_endpoint,
+            ],
+            check=False,
+            env=self.environment,
+        )
+
+        if proc.returncode == 0:
+            return True
+
+        detail = (
+            proc.stderr
+            + "\n"
+            + proc.stdout
+        )
+
+        if "404" in detail:
+            return False
+
+        raise ReleaseError(
+            "could not determine whether the GitLab release "
+            f"already exists:\n{detail.strip()}"
+        )
+
+    def create_release(
+        self,
+        notes: Path,
+    ) -> None:
+        payload = {
+            "name": self.title,
+            "tag_name": self.tag,
+            "description": notes.read_text(
+                encoding="utf-8"
+            ),
+        }
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix="carryhandle-gitlab-release-",
+            suffix=".json",
+            delete=False,
+        ) as handle:
+            json.dump(payload, handle)
+            payload_path = Path(handle.name)
+
+        try:
+            run_cli(
+                [
+                    "glab",
+                    "api",
+                    "--method",
+                    "POST",
+                    f"projects/{self.encoded_project}/releases",
+                    "--input",
+                    str(payload_path),
+                ],
+                env=self.environment,
+            )
+        finally:
+            payload_path.unlink(
+                missing_ok=True
+            )
+
+        try:
+            command = [
+                "glab",
+                "release",
+                "upload",
+                self.tag,
+            ]
+
+            command.extend(
+                asset["path"]
+                for asset in self.plan["assets"]
+            )
+
+            command.extend(
+                [
+                    "--repo",
+                    self.repository,
+                ]
+            )
+
+            run_cli(
+                command,
+                env=self.environment,
+            )
+        except ReleaseError as exc:
+            raise ReleaseError(
+                "GitLab release was created, but asset upload failed. "
+                "Automatic rollback is intentionally disabled; inspect "
+                "the release manually before taking further action.\n"
+                f"{exc}"
+            ) from exc
+
+    def verify_release(
+        self,
+        notes: Path,
+    ) -> dict:
+        proc = run_cli(
+            [
+                "glab",
+                "api",
+                self.release_endpoint,
+            ],
+            env=self.environment,
+        )
+
+        data = parse_json_output(
+            proc,
+            "GitLab release lookup",
+        )
+
+        if data.get("tag_name") != self.tag:
+            raise ReleaseError(
+                "GitLab release tag does not match the requested tag"
+            )
+
+        if data.get("name") != self.title:
+            raise ReleaseError(
+                "GitLab release title does not match the requested title"
+            )
+
+        expected_notes = notes.read_text(
+            encoding="utf-8"
+        ).rstrip("\r\n")
+        actual_notes = str(
+            data.get("description", "")
+        ).rstrip("\r\n")
+
+        if actual_notes != expected_notes:
+            raise ReleaseError(
+                "GitLab release notes do not match the requested notes file"
+            )
+
+        assets = data.get("assets")
+
+        if not isinstance(assets, dict):
+            raise ReleaseError(
+                "GitLab release returned invalid asset metadata"
+            )
+
+        links = assets.get("links")
+
+        if not isinstance(links, list):
+            raise ReleaseError(
+                "GitLab release returned invalid asset links"
+            )
+
+        actual_names = {
+            item.get("name")
+            for item in links
+            if isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+        }
+
+        expected_names = set(
+            expected_asset_map(self.plan)
+        )
+
+        if actual_names != expected_names:
+            raise ReleaseError(
+                "GitLab release asset names differ from the "
+                "explicitly supplied asset set"
+            )
+
+        links_data = data.get("_links")
+        url = ""
+
+        if isinstance(links_data, dict):
+            value = links_data.get("self")
+
+            if isinstance(value, str):
+                url = value
+
+        data["url"] = url
+        return data
+
+    def download_asset(
+        self,
+        asset: dict,
+        destination: Path,
+    ) -> Path:
+        run_cli(
+            [
+                "glab",
+                "release",
+                "download",
+                self.tag,
+                "--repo",
+                self.repository,
+                "--dir",
+                str(destination),
+                "--asset-name",
+                asset["name"],
+            ],
+            env=self.environment,
+        )
+
+        files = [
+            candidate
+            for candidate in destination.iterdir()
+            if candidate.is_file()
+        ]
+
+        if (
+            len(files) != 1
+            or files[0].name != asset["name"]
+        ):
+            raise ReleaseError(
+                "GitLab release download did not produce exactly "
+                f"the requested asset {asset['name']}"
+            )
+
+        return files[0]
+
+
+def provider_for_plan(
+    plan: dict,
+) -> ReleaseProvider:
+    provider = plan["provider"]
+
+    if provider == "github":
+        return GitHubProvider(plan)
+
+    if provider == "gitlab":
+        return GitLabProvider(plan)
+
+    raise ReleaseError(
+        f"unsupported release provider: {provider!r}"
+    )
+
+
+def publish_release(
+    plan: dict,
+    args: argparse.Namespace,
+) -> dict:
+    notes = plan_notes_path(args)
+    provider = provider_for_plan(plan)
+    return provider.publish(notes)
+
+
+def print_publish_human(
+    plan: dict,
+    publication: dict,
+) -> None:
+    print("CarryHandle release publication: PASS")
+    print()
+    print(f"Application : {plan['application']}")
+    print(f"Tag         : {plan['tag']} ({plan['tag_type']})")
+    print(f"Commit      : {plan['commit']}")
+    print(f"Provider    : {publication['provider']}")
+    print(f"Repository  : {publication['repository']}")
+    print(f"Title       : {publication['title']}")
+
+    if publication["url"]:
+        print(f"Release URL : {publication['url']}")
+
+    print()
+    print("Fresh-download verification:")
+
+    for asset in publication["assets"]:
+        print(f"  {asset['name']}")
+        print(f"    bytes  : {asset['bytes']}")
+        print(f"    SHA256 : {asset['sha256']}")
+
+    print()
+    print("Publication: PERFORMED AND VERIFIED")
+
 def print_human(plan: dict) -> None:
     print("CarryHandle release publication preflight: PASS")
     print()
@@ -508,6 +1307,15 @@ def print_human(plan: dict) -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    requested_command = (
+        argv[0]
+        if argv
+        else None
+    )
+    parse_argv = list(argv)
+
+    if requested_command == "publish":
+        parse_argv[0] = "check"
     parser = argparse.ArgumentParser(
         description=(
             "Validate an already-tagged CarryHandle consumer "
@@ -589,38 +1397,83 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="emit the validated release plan as JSON",
     )
 
-    return parser.parse_args(argv)
+    sub.add_parser(
+        "publish",
+        help=(
+            "publish an already-tagged release and verify "
+            "freshly downloaded assets"
+        ),
+    )
+
+    args = parser.parse_args(parse_argv)
+
+    if requested_command == "publish":
+        args.command = "publish"
+
+    return args
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     try:
+        plan = build_plan(args)
+
         if args.command == "check":
-            plan = build_plan(args)
-        else:
-            raise ReleaseError(
-                f"unsupported command: {args.command}"
+            if args.json:
+                print(
+                    json.dumps(
+                        plan,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print_human(plan)
+
+            return 0
+
+        if args.command == "publish":
+            publication = publish_release(
+                plan,
+                args,
             )
+
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "plan": plan,
+                            "publication": publication,
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print_publish_human(
+                    plan,
+                    publication,
+                )
+
+            return 0
+
+        raise ReleaseError(
+            f"unsupported command: {args.command!r}"
+        )
+
     except ReleaseError as exc:
+        label = (
+            "CarryHandle release publication"
+            if args.command == "publish"
+            else "CarryHandle release preflight"
+        )
+
         print(
-            f"CarryHandle release preflight: FAIL: {exc}",
+            f"{label}: FAIL: {exc}",
             file=sys.stderr,
         )
         return 1
-
-    if args.json:
-        print(
-            json.dumps(
-                plan,
-                indent=2,
-                sort_keys=True,
-            )
-        )
-    else:
-        print_human(plan)
-
-    return 0
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ CH_RELEASE_ALLOW_DIRTY_ARGS = \
 CH_RELEASE_TITLE_ARGS = \
 	$(if $(strip $(RELEASE_TITLE)),--title "$(RELEASE_TITLE)",)
 
-.PHONY: publish-release-check help
+.PHONY: publish-release-check publish-release help
 
 publish-release-check:
 	@test -n "$(strip $(RELEASE_TAG))" || \
@@ -70,11 +70,34 @@ publish-release-check:
 		--remote "$(RELEASE_REMOTE)" \
 		$(CH_RELEASE_ALLOW_DIRTY_ARGS)
 
+
+publish-release:
+	@test -n "$(strip $(RELEASE_TAG))" || \
+		( echo "ERROR: RELEASE_TAG is required"; false )
+	@test -n "$(strip $(RELEASE_ASSETS))" || \
+		( echo "ERROR: RELEASE_ASSETS is required"; false )
+	@test -n "$(strip $(RELEASE_NOTES))" || \
+		( echo "ERROR: RELEASE_NOTES is required"; false )
+	@test -f "$(CH_RELEASE_TOOL)" || \
+		( echo "ERROR: missing CarryHandle release tool $(CH_RELEASE_TOOL)"; false )
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(CH_RELEASE_TOOL)" publish \
+		--repo "$(CH_RELEASE_REPO)" \
+		--manifest "$(CH_RELEASE_MANIFEST)" \
+		--tag "$(RELEASE_TAG)" \
+		$(CH_RELEASE_ASSET_ARGS) \
+		--notes "$(RELEASE_NOTES)" \
+		$(CH_RELEASE_TITLE_ARGS) \
+		--provider "$(RELEASE_PROVIDER)" \
+		--remote "$(RELEASE_REMOTE)" \
+		$(CH_RELEASE_ALLOW_DIRTY_ARGS)
+
 help::
 	@echo
 	@echo "Release publication:"
 	@echo "  make publish-release-check"
 	@echo "                     Validate an already-tagged release without publishing"
+	@echo "  make publish-release"
+	@echo "                     Publish a preflight-valid release and verify assets"
 	@echo "                     Required: RELEASE_TAG RELEASE_ASSETS RELEASE_NOTES"
 	@echo "                     Optional: RELEASE_TITLE RELEASE_PROVIDER RELEASE_REMOTE"
 	@echo "                               RELEASE_ALLOW_DIRTY"
