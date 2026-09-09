@@ -26,8 +26,8 @@ GENERATED_APP_HEADER := $(PROJECT_DIR)/$(BUILD)/ch_application_config.h
 
 CARD_BUILD_TOOL       := $(CARRY_ROOT)/tools/ch_card_build.py
 CARD_ASSET_TOOL       := $(CARRY_ROOT)/tools/ch_card_assets.py
-CARD_BANNER           := $(PROJECT_DIR)/assets/card-banner.png
-CARD_ICON             := $(PROJECT_DIR)/assets/card-icon.png
+CARD_BANNER           := $(PROJECT_DIR)/assets/presentation/banner.png
+CARD_ICON             := $(PROJECT_DIR)/assets/presentation/card-icon.png
 
 GENERATED_CARD_HEADER := $(PROJECT_DIR)/$(BUILD)/ch_card_presentation_data.h
 GENERATED_CARD_SOURCE := $(PROJECT_DIR)/$(BUILD)/ch_card_presentation_data.c

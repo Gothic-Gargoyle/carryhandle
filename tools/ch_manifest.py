@@ -14,10 +14,10 @@ import re
 import sys
 
 
-MANIFEST_VERSION = 3
+MANIFEST_VERSION = 4
 
 SUPPORTED_MANIFEST_VERSIONS = frozenset(
-    (1, 2, 3)
+    (1, 2, 3, 4)
 )
 
 REGIONS = {
@@ -118,6 +118,44 @@ def require_section(
     return parser[section]
 
 
+def require_section_fields(
+    parser,
+    section,
+    required,
+    optional=(),
+):
+    if section not in parser:
+        fail(
+            f"missing section [{section}]"
+        )
+
+    actual = set(parser[section].keys())
+    required = set(required)
+    allowed = required | set(optional)
+
+    missing = sorted(
+        required - actual
+    )
+
+    extra = sorted(
+        actual - allowed
+    )
+
+    if missing:
+        fail(
+            f"[{section}] missing: "
+            + ", ".join(missing)
+        )
+
+    if extra:
+        fail(
+            f"[{section}] unknown field(s): "
+            + ", ".join(extra)
+        )
+
+    return parser[section]
+
+
 def require_asset_path(
     value,
     field,
@@ -180,6 +218,7 @@ def load_manifest(path):
         "application",
         "persistence",
         "memcard",
+        "presentation",
     }
 
     unknown = (
@@ -213,6 +252,14 @@ def load_manifest(path):
             f"unsupported manifest_version {version}"
         )
 
+    if (
+        version < 4
+        and "presentation" in parser
+    ):
+        fail(
+            "[presentation] requires manifest_version 4"
+        )
+
     application_fields = (
         "name",
         "game_code",
@@ -238,7 +285,11 @@ def load_manifest(path):
     name = require_ascii(
         app["name"],
         "application.name",
-        maximum=64,
+        maximum=(
+            31
+            if version >= 4
+            else 64
+        ),
     )
 
     game_code = require_ascii(
@@ -290,6 +341,36 @@ def load_manifest(path):
             "letters, digits, '.', '_' and '-'"
         )
 
+    presentation = None
+
+    if version >= 4:
+        view = require_section(
+            parser,
+            "presentation",
+            (
+                "banner",
+                "company",
+                "description",
+            ),
+        )
+
+        presentation = {
+            "banner": require_asset_path(
+                view["banner"],
+                "presentation.banner",
+            ),
+            "company": require_ascii(
+                view["company"],
+                "presentation.company",
+                maximum=31,
+            ),
+            "description": require_ascii(
+                view["description"],
+                "presentation.description",
+                maximum=127,
+            ),
+        }
+
     memcard = None
 
     if "memcard" in parser:
@@ -311,11 +392,27 @@ def load_manifest(path):
                 "icon",
             )
 
-        card = require_section(
-            parser,
-            "memcard",
-            fields,
-        )
+        if version >= 4:
+            card = require_section_fields(
+                parser,
+                "memcard",
+                (
+                    "filename",
+                    "sectors",
+                    "icon",
+                ),
+                (
+                    "title",
+                    "comment",
+                    "banner",
+                ),
+            )
+        else:
+            card = require_section(
+                parser,
+                "memcard",
+                fields,
+            )
 
         #
         # Manifest v1 predates explicit CARD file geometry.
@@ -343,6 +440,33 @@ def load_manifest(path):
                     "1 and 4294967295"
                 )
 
+        title_value = (
+            card["title"]
+            if version < 4
+            else card.get(
+                "title",
+                name,
+            )
+        )
+
+        comment_value = (
+            card["comment"]
+            if version < 4
+            else card.get(
+                "comment",
+                presentation["description"],
+            )
+        )
+
+        banner_value = (
+            card["banner"]
+            if version < 4
+            else card.get(
+                "banner",
+                presentation["banner"],
+            )
+        )
+
         memcard = {
             "filename": require_ascii(
                 card["filename"],
@@ -351,17 +475,17 @@ def load_manifest(path):
             ),
             "sectors": sectors,
             "title": require_ascii(
-                card["title"],
+                title_value,
                 "memcard.title",
                 maximum=31,
             ),
             "comment": require_ascii(
-                card["comment"],
+                comment_value,
                 "memcard.comment",
                 maximum=31,
             ),
             "banner": require_asset_path(
-                card["banner"],
+                banner_value,
                 "memcard.banner",
             ),
             "icon": require_asset_path(
@@ -379,6 +503,8 @@ def load_manifest(path):
         "region": region,
         "region_bi2": REGIONS[region],
         "store_id": store_id,
+        "has_presentation": presentation is not None,
+        "presentation": presentation,
         "has_memcard": memcard is not None,
         "memcard": memcard,
     }

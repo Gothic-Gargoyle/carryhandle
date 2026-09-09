@@ -12,6 +12,12 @@ ifneq ($(BUILD),$(notdir $(CURDIR)))
 GCM_BUILDER ?= \
 	$(CARRY_ROOT)/tools/native-gcm/ch_gcm.py
 
+GCM_BNR_TOOL ?= \
+	$(CARRY_ROOT)/tools/native-gcm/ch_bnr.py
+
+GCM_MANIFEST_TOOL ?= \
+	$(CARRY_ROOT)/tools/ch_manifest.py
+
 GCM_APPLOADER ?= \
 	$(CARRY_ROOT)/tools/native-gcm/apploader.bin
 
@@ -53,8 +59,22 @@ iso: all $(GCM_PREPARE)
 	@test -f "$(GCM_MANIFEST)" || \
 		( echo "ERROR: missing CarryHandle manifest $(GCM_MANIFEST)"; false )
 
+	@test -f "$(GCM_MANIFEST_TOOL)" || \
+		( echo "ERROR: missing CarryHandle manifest tool $(GCM_MANIFEST_TOOL)"; false )
+
 	@test -d "$(GCM_ROOT)" || \
 		( echo "ERROR: missing disc root $(GCM_ROOT)"; false )
+
+	@GCM_HAS_PRESENTATION="$$(PYTHONDONTWRITEBYTECODE=1 python3 -c 'import runpy, sys; namespace = runpy.run_path(sys.argv[1]); manifest = namespace["load_manifest"](sys.argv[2]); print("yes" if manifest["presentation"] is not None else "no")' "$(GCM_MANIFEST_TOOL)" "$(GCM_MANIFEST)")" || exit $$?; \
+	if [ "$$GCM_HAS_PRESENTATION" = "yes" ]; then \
+		test -f "$(GCM_BNR_TOOL)" || \
+			{ echo "ERROR: missing BNR builder $(GCM_BNR_TOOL)"; exit 1; }; \
+		PYTHONDONTWRITEBYTECODE=1 python3 "$(GCM_BNR_TOOL)" \
+			--manifest "$(GCM_MANIFEST)" \
+			--output "$(GCM_ROOT)/opening.bnr" || exit $$?; \
+	else \
+		echo "CarryHandle presentation: no opening.bnr requested"; \
+	fi
 
 	python3 "$(GCM_BUILDER)" \
 		--dol "$(GCM_DOL)" \
