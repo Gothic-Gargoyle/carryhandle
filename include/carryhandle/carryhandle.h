@@ -13,6 +13,7 @@
 #include <carryhandle/ch_application_save.h>
 #include <carryhandle/ch_card_presentation.h>
 #include <carryhandle/ch_memcard.h>
+#include <carryhandle/ch_memcard_ui.h>
 #include <carryhandle/ch_dvd.h>
 #include <carryhandle/ch_input.h>
 #include <carryhandle/ch_rumble.h>
