@@ -1,4 +1,5 @@
 #include <carryhandle/ch_controller_glyph.h>
+#include <string.h>
 
 
 const char *CH_ControllerGlyphName(
@@ -323,4 +324,78 @@ CH_ControllerGlyph CH_ControllerGlyphForPhysical(
         default:
             return CH_CONTROLLER_GLYPH_NONE;
     }
+}
+
+typedef struct
+{
+    const char *key;
+    const char *path;
+} CH_ControllerGlyphAssetEntry;
+
+static const CH_ControllerGlyphAssetEntry
+chControllerGlyphAssets[] =
+{
+    { "a", "assets/controller/gamecube/zacksly/buttons/A.svg" },
+    { "b", "assets/controller/gamecube/zacksly/buttons/B.svg" },
+    { "x", "assets/controller/gamecube/zacksly/buttons/X.svg" },
+    { "y", "assets/controller/gamecube/zacksly/buttons/Y.svg" },
+    { "l-analog", "assets/controller/gamecube/zacksly/buttons/L Analog.svg" },
+    { "l-digital", "assets/controller/gamecube/zacksly/buttons/L Digital.svg" },
+    { "r-analog", "assets/controller/gamecube/zacksly/buttons/R Analog.svg" },
+    { "r-digital", "assets/controller/gamecube/zacksly/buttons/R Digital.svg" },
+    { "z", "assets/controller/gamecube/zacksly/buttons/Right Bumper.svg" },
+    { "start", "assets/controller/gamecube/zacksly/buttons/Start Pause.svg" },
+    { "dpad", "assets/controller/gamecube/zacksly/buttons/D-Pad.svg" },
+    { "dpad-up", "assets/controller/gamecube/zacksly/buttons/D-Pad Up.svg" },
+    { "dpad-down", "assets/controller/gamecube/zacksly/buttons/D-Pad Down.svg" },
+    { "dpad-left", "assets/controller/gamecube/zacksly/buttons/D-Pad Left.svg" },
+    { "dpad-right", "assets/controller/gamecube/zacksly/buttons/D-Pad Right.svg" },
+    { "dpad-left-right", "assets/controller/gamecube/zacksly/buttons/D-Pad Left-Right.svg" },
+    { "dpad-up-down", "assets/controller/gamecube/zacksly/buttons/D-Pad Up-Down.svg" },
+    { "stick", "assets/controller/gamecube/zacksly/buttons/Control Stick.svg" },
+    { "stick-up", "assets/controller/gamecube/zacksly/buttons/Control Stick Up.svg" },
+    { "stick-down", "assets/controller/gamecube/zacksly/buttons/Control Stick Down.svg" },
+    { "stick-left", "assets/controller/gamecube/zacksly/buttons/Control Stick Left.svg" },
+    { "stick-right", "assets/controller/gamecube/zacksly/buttons/Control Stick Right.svg" },
+    { "stick-left-right", "assets/controller/gamecube/zacksly/buttons/Control Stick Left-Right.svg" },
+    { "stick-up-down", "assets/controller/gamecube/zacksly/buttons/Control Stick Up-Down.svg" },
+    { "stick-all", "assets/controller/gamecube/zacksly/buttons/Control Stick All.svg" },
+    { "stick-clockwise", "assets/controller/gamecube/zacksly/buttons/Control Stick Clockwise.svg" },
+    { "stick-counter-clockwise", "assets/controller/gamecube/zacksly/buttons/Control Stick Counter Clockwise.svg" },
+    { "cstick", "assets/controller/gamecube/zacksly/buttons/C Stick.svg" },
+    { "cstick-up", "assets/controller/gamecube/zacksly/buttons/C Stick Up.svg" },
+    { "cstick-down", "assets/controller/gamecube/zacksly/buttons/C Stick Down.svg" },
+    { "cstick-left", "assets/controller/gamecube/zacksly/buttons/C Stick Left.svg" },
+    { "cstick-right", "assets/controller/gamecube/zacksly/buttons/C Stick Right.svg" },
+    { "cstick-left-right", "assets/controller/gamecube/zacksly/buttons/C Stick Left-Right.svg" },
+    { "cstick-up-down", "assets/controller/gamecube/zacksly/buttons/C Stick Up-Down.svg" },
+    { "cstick-all", "assets/controller/gamecube/zacksly/buttons/C Stick All.svg" },
+    { "cstick-clockwise", "assets/controller/gamecube/zacksly/buttons/C Stick Clockwise copy.svg" },
+    { "cstick-counter-clockwise", "assets/controller/gamecube/zacksly/buttons/C Stick Counter Clockwise copy.svg" },
+};
+
+const char *CH_ControllerGlyphAssetPath(
+    CH_ControllerGlyph glyph)
+{
+    const char *key =
+        CH_ControllerGlyphAssetKey(glyph);
+    size_t i;
+
+    if (key == NULL || key[0] == '\0')
+        return NULL;
+
+    for (i = 0;
+         i < sizeof(chControllerGlyphAssets) /
+             sizeof(chControllerGlyphAssets[0]);
+         ++i)
+    {
+        if (strcmp(
+                key,
+                chControllerGlyphAssets[i].key) == 0)
+        {
+            return chControllerGlyphAssets[i].path;
+        }
+    }
+
+    return NULL;
 }

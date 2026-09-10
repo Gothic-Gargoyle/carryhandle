@@ -100,6 +100,18 @@ const char *CH_ControllerGlyphName(
 const char *CH_ControllerGlyphAssetKey(
     CH_ControllerGlyph glyph);
 
+/*
+ * Return the canonical CarryHandle-relative SVG asset path for a glyph.
+ *
+ * The returned path is renderer-neutral and has no device prefix. A
+ * consumer that mirrors CarryHandle's assets tree into a GameCube FST can,
+ * for example, prepend "dvd:/" before opening it.
+ *
+ * Returns NULL for NONE/COUNT/invalid values or unavailable artwork.
+ */
+const char *CH_ControllerGlyphAssetPath(
+    CH_ControllerGlyph glyph);
+
 
 /*
  * Map one existing CarryHandle physical input to its canonical prompt glyph.
