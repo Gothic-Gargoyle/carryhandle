@@ -335,43 +335,53 @@ typedef struct
 static const CH_ControllerGlyphAssetEntry
 chControllerGlyphAssets[] =
 {
-    { "a", "assets/controller/gamecube/zacksly/buttons/A.svg" },
-    { "b", "assets/controller/gamecube/zacksly/buttons/B.svg" },
-    { "x", "assets/controller/gamecube/zacksly/buttons/X.svg" },
-    { "y", "assets/controller/gamecube/zacksly/buttons/Y.svg" },
-    { "l-analog", "assets/controller/gamecube/zacksly/buttons/L Analog.svg" },
-    { "l-digital", "assets/controller/gamecube/zacksly/buttons/L Digital.svg" },
-    { "r-analog", "assets/controller/gamecube/zacksly/buttons/R Analog.svg" },
-    { "r-digital", "assets/controller/gamecube/zacksly/buttons/R Digital.svg" },
-    { "z", "assets/controller/gamecube/zacksly/buttons/Right Bumper.svg" },
-    { "start", "assets/controller/gamecube/zacksly/buttons/Start Pause.svg" },
-    { "dpad", "assets/controller/gamecube/zacksly/buttons/D-Pad.svg" },
-    { "dpad-up", "assets/controller/gamecube/zacksly/buttons/D-Pad Up.svg" },
-    { "dpad-down", "assets/controller/gamecube/zacksly/buttons/D-Pad Down.svg" },
-    { "dpad-left", "assets/controller/gamecube/zacksly/buttons/D-Pad Left.svg" },
-    { "dpad-right", "assets/controller/gamecube/zacksly/buttons/D-Pad Right.svg" },
-    { "dpad-left-right", "assets/controller/gamecube/zacksly/buttons/D-Pad Left-Right.svg" },
-    { "dpad-up-down", "assets/controller/gamecube/zacksly/buttons/D-Pad Up-Down.svg" },
-    { "stick", "assets/controller/gamecube/zacksly/buttons/Control Stick.svg" },
-    { "stick-up", "assets/controller/gamecube/zacksly/buttons/Control Stick Up.svg" },
-    { "stick-down", "assets/controller/gamecube/zacksly/buttons/Control Stick Down.svg" },
-    { "stick-left", "assets/controller/gamecube/zacksly/buttons/Control Stick Left.svg" },
-    { "stick-right", "assets/controller/gamecube/zacksly/buttons/Control Stick Right.svg" },
-    { "stick-left-right", "assets/controller/gamecube/zacksly/buttons/Control Stick Left-Right.svg" },
-    { "stick-up-down", "assets/controller/gamecube/zacksly/buttons/Control Stick Up-Down.svg" },
-    { "stick-all", "assets/controller/gamecube/zacksly/buttons/Control Stick All.svg" },
-    { "stick-clockwise", "assets/controller/gamecube/zacksly/buttons/Control Stick Clockwise.svg" },
-    { "stick-counter-clockwise", "assets/controller/gamecube/zacksly/buttons/Control Stick Counter Clockwise.svg" },
-    { "cstick", "assets/controller/gamecube/zacksly/buttons/C Stick.svg" },
-    { "cstick-up", "assets/controller/gamecube/zacksly/buttons/C Stick Up.svg" },
-    { "cstick-down", "assets/controller/gamecube/zacksly/buttons/C Stick Down.svg" },
-    { "cstick-left", "assets/controller/gamecube/zacksly/buttons/C Stick Left.svg" },
-    { "cstick-right", "assets/controller/gamecube/zacksly/buttons/C Stick Right.svg" },
-    { "cstick-left-right", "assets/controller/gamecube/zacksly/buttons/C Stick Left-Right.svg" },
-    { "cstick-up-down", "assets/controller/gamecube/zacksly/buttons/C Stick Up-Down.svg" },
-    { "cstick-all", "assets/controller/gamecube/zacksly/buttons/C Stick All.svg" },
-    { "cstick-clockwise", "assets/controller/gamecube/zacksly/buttons/C Stick Clockwise copy.svg" },
-    { "cstick-counter-clockwise", "assets/controller/gamecube/zacksly/buttons/C Stick Counter Clockwise copy.svg" },
+    { "a", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-A.bmp" },
+    { "b", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-B.bmp" },
+    { "x", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-X.bmp" },
+    { "y", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Y.bmp" },
+
+    /*
+     * Toomai provides separate trigger states:
+     *   -P = pressed analogue travel
+     *   -C = clicked digital bottom switch
+     */
+    { "l-analog", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-L.bmp" },
+    { "l-digital", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-L.bmp" },
+    { "r-analog", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-R.bmp" },
+    { "r-digital", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-R.bmp" },
+
+    { "z", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Z.bmp" },
+    { "start", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Start-Pause.bmp" },
+
+    { "dpad", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-D-Pad.bmp" },
+    { "dpad-up", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-D-Pad-U.bmp" },
+    { "dpad-down", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-D-Pad-D.bmp" },
+    { "dpad-left", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-D-Pad-L.bmp" },
+    { "dpad-right", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-D-Pad-R.bmp" },
+    { "dpad-left-right", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-D-Pad.bmp" },
+    { "dpad-up-down", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-D-Pad.bmp" },
+
+    { "stick", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick.bmp" },
+    { "stick-up", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick-U.bmp" },
+    { "stick-down", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick-D.bmp" },
+    { "stick-left", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick-L.bmp" },
+    { "stick-right", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick-R.bmp" },
+    { "stick-left-right", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick.bmp" },
+    { "stick-up-down", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick.bmp" },
+    { "stick-all", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick.bmp" },
+    { "stick-clockwise", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick.bmp" },
+    { "stick-counter-clockwise", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-Control Stick.bmp" },
+
+    { "cstick", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick.bmp" },
+    { "cstick-up", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick-U.bmp" },
+    { "cstick-down", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick-D.bmp" },
+    { "cstick-left", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick-L.bmp" },
+    { "cstick-right", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick-R.bmp" },
+    { "cstick-left-right", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick.bmp" },
+    { "cstick-up-down", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick.bmp" },
+    { "cstick-all", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick.bmp" },
+    { "cstick-clockwise", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick.bmp" },
+    { "cstick-counter-clockwise", "assets/controller/gamecube/toomai/bmp/ButtonIcon-GCN-C-Stick.bmp" }
 };
 
 const char *CH_ControllerGlyphAssetPath(

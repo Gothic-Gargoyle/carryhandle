@@ -15,8 +15,11 @@ extern "C" {
  * asset_root is prepended to CH_ControllerGlyphAssetPath(). For a native
  * GameCube image whose FST mirrors CarryHandle's assets tree, pass "dvd:/".
  *
- * The SVG is rasterized directly at size x size by SDL2_image/NanoSVG.
- * Original colour and soft alpha are preserved. The returned texture uses
+ * SVG assets are rasterized at size x size by SDL2_image/NanoSVG.
+ * Pre-rasterized bitmap controller prompts are decoded with SDL's built-in
+ * BMP loader and scaled to size x size before texture creation.
+ *
+ * Original colour and alpha are preserved. The returned texture uses
  * SDL_BLENDMODE_BLEND and is owned by the caller.
  *
  * Returns NULL and sets the SDL error string on failure.

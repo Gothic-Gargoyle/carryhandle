@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) by Toomai Glittershine for SmashWiki -->
+<svg id="svg2" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xlink="http://www.w3.org/1999/xlink"
+		height="256" width="256"
+		viewBox="0 0 256 256">
+	<defs id="defs4">
+		<clipPath id="clipPath4175" clipPathUnits="userSpaceOnUse" >
+			<ellipse id="ellipse4177" cx="155.5" cy="224" rx="144.5" ry="168"/>
+		</clipPath>
+		<clipPath id="clipPath4187" clipPathUnits="userSpaceOnUse" >
+			<path id="path4189"
+				d="m -24,2 0,227 C 16,169 288,68 461,37 l 0,-35 z"
+			/>
+		</clipPath>
+		<filter id="filter4169" x="0" y="0" width="1" height="1" style="color-interpolation-filters:sRGB">
+			<feGaussianBlur id="feGaussianBlur4171" stdDeviation="1.5625" />
+		</filter>
+	</defs>
+	<metadata id="metadata7">
+		<rdf:RDF>
+			<cc:Work rdf:about="">
+				<dc:format>image/svg+xml</dc:format>
+				<dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+				<dc:title/>
+			</cc:Work>
+		</rdf:RDF>
+	</metadata>
+	<g id="g4239">
+		<path id="rect4229" style="opacity:0.25;fill:#000000;fill-opacity:1;stroke:none;"
+			d="m 121,74 0,55 12,0 0,-15 7,15 12,0 -11,-24 c 0,0 11,-3.02691 11,-15.279297 C 152,77.468315 143.23622,74.039071 139,74 Z m 13,9 c 0,0 6,0.04625 6,6 0,5.953746 -6,6 -6,6 -0.4714,0 -1,-0.528595 -1,-1 l 0,-10 c 0,-0.471405 0.5286,-1 1,-1 z"
+		/>
+		<path id="path4234" style="opacity:0.33333333;fill:#000000;fill-opacity:1;stroke:none;"
+			d="M 121 74 L 121 78 L 139 78 C 142.97917 78.0367 150.95124 81.065971 151.9043 91.587891 C 151.96298 90.98865 152 90.370992 152 89.720703 C 152 77.468315 143.23622 74.039071 139 74 L 121 74 z M 140 89 C 140 94.953746 134 95 134 95 C 133.5286 95 133 94.471405 133 94 L 133 98 C 133 98.471405 133.5286 99 134 99 C 134 99 140 98.953746 140 93 L 140 89 z M 141 105 L 141 109 L 150.16602 129 L 152 129 L 141 105 z "
+		/>
+		<g id="g4183" clip-path="url(#clipPath4187)" transform="matrix(-1,0,0,1,256,0)">
+			<path id="path3367" clip-path="url(#clipPath4175)" style="opacity:0.5;fill:none;stroke:#ff9f00;stroke-width:10;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;filter:url(#filter4169);"
+				d="m -24,2 0,227 C 16,169 288,68 461,37 l 0,-35 z"
+			/>
+			<ellipse id="path3363" cx="155.5" cy="224" rx="144.5" ry="168" style="opacity:1;fill:#bfbfbf;fill-opacity:1;stroke:none;" transform="translate(0,75)" />
+			<ellipse id="ellipse4167" clip-path="url(#clipPath4175)" cx="155.5" cy="224" rx="144.5" ry="168" style="opacity:1;fill:none;stroke:#ff9f00;stroke-width:10;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;" />
+		</g>
+	</g>
+</svg>
