@@ -15,6 +15,7 @@
 #include <carryhandle/ch_memcard.h>
 #include <carryhandle/ch_memcard_ui.h>
 #include <carryhandle/ch_dvd.h>
+#include <carryhandle/ch_remote_disc.h>
 #include <carryhandle/ch_input.h>
 #include <carryhandle/ch_rumble.h>
 #include <carryhandle/ch_splash.h>
