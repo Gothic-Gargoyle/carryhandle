@@ -182,6 +182,24 @@ CH_USB_GECKO_DEVICES := $(wildcard /dev/serial/by-id/*USB*Gecko*)
 WIILOAD ?= $(if $(filter 1,$(words $(CH_USB_GECKO_DEVICES))),$(firstword $(CH_USB_GECKO_DEVICES)))
 CH_RUNNER_NAME := $(notdir $(firstword $(RUNNER)))
 
+# PC-hosted GameCube image development transport.
+#
+# run-remote intentionally remains distinct from run:
+#
+#   make run
+#       upload/launch the DOL only
+#
+#   make run-remote REMOTE_IMAGE=/path/to/game.iso
+#       upload/launch the DOL, then serve that image over USB Gecko
+#
+# REMOTE_DEVICE defaults to the same stable USB Gecko selected for wiiload.
+REMOTE_IMAGE ?=
+REMOTE_DEVICE ?= $(WIILOAD)
+REMOTE_SERVER ?= $(CARRY_ROOT)/tools/remote-disc/ch_remote_disc_server.py
+REMOTE_PYTHON ?= python3
+REMOTE_SERVER_ARGS ?=
+REMOTE_SERVER_DELAY ?= 0.10
+
 CLEAN_FILES ?=
 CLEAN_DIRS ?=
 
@@ -238,7 +256,8 @@ export OFILES := \
 	all \
 	$(BUILD) \
 	clean \
-	run
+	run \
+	run-remote
 
 all: $(BUILD)
 
@@ -293,6 +312,55 @@ else
 		$(RUNNER_ARGS) \
 		"$(RUN_IMAGE)"
 endif
+
+
+
+# -----------------------------------------------------------------------------
+# PC-hosted remote-disc development run
+# -----------------------------------------------------------------------------
+
+run-remote: all
+	@test -n "$(strip $(REMOTE_IMAGE))" || { \
+		echo "ERROR: run-remote requires REMOTE_IMAGE=/path/to/game.iso"; \
+		false; \
+	}
+	@test -f "$(REMOTE_IMAGE)" || { \
+		echo "ERROR: remote image not found: $(REMOTE_IMAGE)"; \
+		false; \
+	}
+	@test -f "$(REMOTE_SERVER)" || { \
+		echo "ERROR: CarryHandle remote-disc server missing: $(REMOTE_SERVER)"; \
+		false; \
+	}
+	@test -n "$(strip $(REMOTE_DEVICE))" || { \
+		echo "ERROR: no USB Gecko selected for remote-disc transport"; \
+		echo "       set REMOTE_DEVICE=/dev/serial/by-id/... explicitly"; \
+		false; \
+	}
+	@case "$(REMOTE_DEVICE)" in \
+		/*) : ;; \
+		*) \
+			echo "ERROR: REMOTE_DEVICE must be a local serial-device path"; \
+			echo "       got: $(REMOTE_DEVICE)"; \
+			false ;; \
+	esac
+	@echo "Remote image : $(REMOTE_IMAGE)"
+	@echo "Remote Gecko : $(REMOTE_DEVICE)"
+	@echo
+	@$(MAKE) \
+		--no-print-directory \
+		-f "$(CONSUMER_MAKEFILE)" \
+		WIILOAD="$(REMOTE_DEVICE)" \
+		run
+	@sleep "$(REMOTE_SERVER_DELAY)"
+	@echo
+	@echo "Starting CarryHandle remote-disc server..."
+	@echo
+	$(REMOTE_PYTHON) \
+		"$(REMOTE_SERVER)" \
+		--device "$(REMOTE_DEVICE)" \
+		--image "$(REMOTE_IMAGE)" \
+		$(REMOTE_SERVER_ARGS)
 
 
 # -----------------------------------------------------------------------------
