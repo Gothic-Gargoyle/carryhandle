@@ -163,6 +163,15 @@ RUNNER ?= wiiload
 RUNNER_ARGS ?=
 RUN_IMAGE ?= $(PROJECT_DIR)/$(TARGET).dol
 
+# wiiload uses WIILOAD to select its transport destination.
+#
+# Preserve an explicit environment/command-line WIILOAD value. Otherwise,
+# automatically select a single USB Gecko exposed through Linux's stable
+# /dev/serial/by-id namespace.
+CH_USB_GECKO_DEVICES := $(wildcard /dev/serial/by-id/*USB*Gecko*)
+WIILOAD ?= $(if $(filter 1,$(words $(CH_USB_GECKO_DEVICES))),$(firstword $(CH_USB_GECKO_DEVICES)))
+CH_RUNNER_NAME := $(notdir $(firstword $(RUNNER)))
+
 CLEAN_FILES ?=
 CLEAN_DIRS ?=
 
@@ -244,9 +253,36 @@ clean:
 run: all
 	@test -f "$(RUN_IMAGE)" || \
 		( echo "ERROR: missing run image $(RUN_IMAGE)"; false )
+ifeq ($(CH_RUNNER_NAME),wiiload)
+	@test -n "$(strip $(WIILOAD))" || { \
+		count="$(words $(CH_USB_GECKO_DEVICES))"; \
+		if [ "$$count" -gt 1 ]; then \
+			echo "ERROR: multiple USB Gecko devices found; set WIILOAD explicitly"; \
+		else \
+			echo "ERROR: no USB Gecko found under /dev/serial/by-id"; \
+			echo "       set WIILOAD explicitly to override auto-discovery"; \
+		fi; \
+		false; \
+	}
+	@case "$(WIILOAD)" in \
+		/*) \
+			test -r "$(WIILOAD)" && test -w "$(WIILOAD)" || { \
+				echo "ERROR: wiiload device is not readable/writable: $(WIILOAD)"; \
+				echo "       check device permissions / dialout membership"; \
+				false; \
+			} ;; \
+		*) : ;; \
+	esac
+	@echo "USB Gecko: $(WIILOAD)"
+	WIILOAD="$(WIILOAD)" \
+		$(RUNNER) \
+		$(RUNNER_ARGS) \
+		"$(RUN_IMAGE)"
+else
 	$(RUNNER) \
 		$(RUNNER_ARGS) \
 		"$(RUN_IMAGE)"
+endif
 
 
 # -----------------------------------------------------------------------------
