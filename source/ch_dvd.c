@@ -75,9 +75,21 @@ static FILE *gc_dvd_image;
 static const char *gc_dvd_image_mount_name;
 static bool gc_dvd_image_mount_owned;
 
+
+/*
+ * Optional PC-hosted image backing.
+ *
+ * The session remains caller-owned. CarryHandle owns only the downloaded
+ * FST buffer while dvd:/ is mounted.
+ */
+static CH_RemoteDiscSession *gc_dvd_remote_session;
+static uint8_t *gc_dvd_remote_fst;
+static uint32_t gc_dvd_remote_fst_size;
+
 enum {
     CH_DVD_BACKING_PHYSICAL = 0,
     CH_DVD_BACKING_IMAGE = 1,
+    CH_DVD_BACKING_REMOTE = 2,
     CH_DVD_BACKING_ERROR = -1
 };
 
@@ -137,6 +149,28 @@ static void CH_DVD_CloseImageBacking(void)
     gc_dvd_image_mount_owned = false;
 }
 
+
+static uint32_t CH_DVD_ReadBE32(
+    const uint8_t *src)
+{
+    return ((uint32_t)src[0] << 24)
+        | ((uint32_t)src[1] << 16)
+        | ((uint32_t)src[2] << 8)
+        | ((uint32_t)src[3]);
+}
+
+
+static void CH_DVD_CloseRemoteBacking(void)
+{
+    if (gc_dvd_remote_fst != NULL) {
+        free(gc_dvd_remote_fst);
+        gc_dvd_remote_fst = NULL;
+    }
+
+    gc_dvd_remote_fst_size = 0;
+    gc_dvd_remote_session = NULL;
+}
+
 static int CH_DVD_TryLaunchImage(void)
 {
     const char *path;
@@ -144,6 +178,9 @@ static int CH_DVD_TryLaunchImage(void)
     DISC_INTERFACE *iface;
     char device_name[10];
     uint8_t header[32];
+
+    if (gc_dvd_remote_session != NULL)
+        return CH_DVD_BACKING_REMOTE;
 
     if (__system_argv == NULL ||
         __system_argv->argvMagic != ARGV_MAGIC ||
@@ -214,6 +251,30 @@ static s32 CH_DVD_ReadAbsBacking(
 {
     size_t got;
 
+    if (gc_dvd_remote_session != NULL) {
+        CH_RemoteDiscResult result;
+
+        (void)block;
+        (void)prio;
+
+        if (offset < 0 ||
+            (uint64_t)offset > UINT32_MAX) {
+            return -1;
+        }
+
+        result = CH_RemoteDiscRead(
+            gc_dvd_remote_session,
+            (uint32_t)offset,
+            buf,
+            len
+        );
+
+        if (result != CH_REMOTE_DISC_RESULT_OK)
+            return -1;
+
+        return (s32)len;
+    }
+
     if (gc_dvd_image == NULL)
         return DVD_ReadAbsPrio(block, buf, len, offset, prio);
 
@@ -246,6 +307,11 @@ static s32 CH_DVD_ReadAbsBacking(
  */
 static const gc_fst_entry_t *CH_DVD_GetFST(void)
 {
+    if (gc_dvd_remote_fst != NULL) {
+        return (const gc_fst_entry_t *)
+            (const void *)gc_dvd_remote_fst;
+    }
+
     volatile uint32_t *fst_ptr =
         (volatile uint32_t *)0x80000038;
 
@@ -766,6 +832,151 @@ bool CH_DVDMount(void)
 }
 
 
+
+bool CH_DVDMountRemote(
+    CH_RemoteDiscSession *session)
+{
+    uint8_t disc_header[32];
+    uint8_t boot_info[16];
+
+    uint32_t fst_offset;
+    uint32_t fst_size;
+    uint32_t fst_max_size;
+
+    uint32_t root_type_name;
+    uint32_t root_count;
+
+    uint8_t *fst;
+
+    CH_RemoteDiscResult result;
+
+    if (session == NULL ||
+        !CH_RemoteDiscIsOpen(session)) {
+        return false;
+    }
+
+    /*
+     * Do not silently replace any already-mounted dvd:/ filesystem.
+     */
+    if (gc_fst_mounted ||
+        gc_dvd_remote_session != NULL ||
+        gc_dvd_remote_fst != NULL) {
+        return false;
+    }
+
+    /*
+     * Basic remote image identity.
+     */
+    result = CH_RemoteDiscRead(
+        session,
+        0,
+        disc_header,
+        sizeof(disc_header)
+    );
+
+    if (result != CH_REMOTE_DISC_RESULT_OK)
+        return false;
+
+    if (disc_header[0x1c] != 0xc2 ||
+        disc_header[0x1d] != 0x33 ||
+        disc_header[0x1e] != 0x9f ||
+        disc_header[0x1f] != 0x3d) {
+        return false;
+    }
+
+    /*
+     * GameCube boot header:
+     *
+     *   0x420 = DOL offset
+     *   0x424 = FST offset
+     *   0x428 = FST size
+     *   0x42c = FST maximum size
+     */
+    result = CH_RemoteDiscRead(
+        session,
+        0x420u,
+        boot_info,
+        sizeof(boot_info)
+    );
+
+    if (result != CH_REMOTE_DISC_RESULT_OK)
+        return false;
+
+    fst_offset =
+        CH_DVD_ReadBE32(boot_info + 4);
+
+    fst_size =
+        CH_DVD_ReadBE32(boot_info + 8);
+
+    fst_max_size =
+        CH_DVD_ReadBE32(boot_info + 12);
+
+    if (fst_size < CH_DVD_FST_ENTRY_SIZE)
+        return false;
+
+    if (fst_max_size < fst_size)
+        return false;
+
+    fst = (uint8_t *)malloc(fst_size);
+
+    if (fst == NULL)
+        return false;
+
+    result = CH_RemoteDiscRead(
+        session,
+        fst_offset,
+        fst,
+        fst_size
+    );
+
+    if (result != CH_REMOTE_DISC_RESULT_OK) {
+        free(fst);
+        return false;
+    }
+
+    /*
+     * Validate enough of the root before installing the FST.
+     *
+     * Entry 0:
+     *   type/name: directory bit
+     *   word1    : parent
+     *   word2    : total entry count
+     */
+    root_type_name =
+        CH_DVD_ReadBE32(fst);
+
+    root_count =
+        CH_DVD_ReadBE32(fst + 8);
+
+    if ((root_type_name & 0x01000000u) == 0 ||
+        root_count == 0 ||
+        root_count > fst_size / CH_DVD_FST_ENTRY_SIZE) {
+        free(fst);
+        return false;
+    }
+
+    gc_dvd_remote_session = session;
+    gc_dvd_remote_fst = fst;
+    gc_dvd_remote_fst_size = fst_size;
+
+    /*
+     * CH_DVDMount() now sees:
+     *
+     *   - our downloaded FST through CH_DVD_GetFST()
+     *   - CH_DVD_BACKING_REMOTE through CH_DVD_TryLaunchImage()
+     *
+     * It therefore registers the ordinary existing dvd:/ devoptab without
+     * touching the physical DVD drive.
+     */
+    if (!CH_DVDMount()) {
+        CH_DVD_CloseRemoteBacking();
+        return false;
+    }
+
+    return true;
+}
+
+
 void CH_DVDUnmount(void)
 {
     if (!gc_fst_mounted)
@@ -774,6 +985,7 @@ void CH_DVDUnmount(void)
     RemoveDevice("dvd:");
 
     CH_DVD_CloseImageBacking();
+    CH_DVD_CloseRemoteBacking();
 
     gc_fst = NULL;
     gc_fst_strings = NULL;

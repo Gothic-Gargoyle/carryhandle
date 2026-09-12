@@ -95,6 +95,16 @@ CFILES += \
 # libogc2-libfat or libogc2-libdvm.
 ifneq ($(filter ch_dvd.c,$(CH_CFILES)),)
 APP_LIBS := -lfat $(APP_LIBS)
+
+# CH_DVD_REMOTE_DISC_DEPENDENCY
+# ch_dvd.c exposes optional PC-hosted dvd:/ backing through the generic
+# remote-disc transport. Pull the transport implementation in automatically
+# so existing consumers selecting ch_dvd.c do not acquire another required
+# CH_CFILES entry.
+ifeq ($(filter ch_remote_disc.c,$(CH_CFILES)),)
+CFILES += ch_remote_disc.c
+endif
+
 endif
 
 # Consumers select modules; CarryHandle owns where its public headers live.
