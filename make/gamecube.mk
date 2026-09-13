@@ -49,8 +49,52 @@ include $(DEVKITPRO)/libogc2/gamecube_rules
 # Standard application interface
 # -----------------------------------------------------------------------------
 
-TARGET ?= app
-BUILD  ?= build
+# ------------------------------------------------------------------
+# Shared artifact identity
+# ------------------------------------------------------------------
+#
+# Consumers may opt into CarryHandle's common versioned artifact naming by
+# defining CH_PROJECT_NAME and CH_VERSION before including this file.
+#
+# Example:
+#
+#   CH_PROJECT_NAME := quake1cube
+#   CH_VERSION      := 0.1.0-dev
+#
+# becomes:
+#
+#   quake1cube-v0.1.0-dev-abcdef0.dol
+#
+# and, when tracked consumer files differ from HEAD:
+#
+#   quake1cube-v0.1.0-dev-abcdef0-dirty.dol
+#
+# Explicit TARGET remains an escape hatch and is never overwritten. Keeping
+# CH_VERSION empty preserves the historical unversioned fallback.
+#
+CH_PROJECT_NAME ?= app
+CH_VERSION      ?=
+
+CH_GIT_HASH := $(shell \
+	git -C "$(PROJECT_DIR)" rev-parse --short HEAD 2>/dev/null || \
+	echo unknown)
+
+# Match the proven DoomCube convention: tracked consumer changes mark the
+# build dirty, while submodule working-tree state is ignored here.
+CH_GIT_DIRTY := $(shell \
+	git -C "$(PROJECT_DIR)" diff --quiet --ignore-submodules HEAD \
+		2>/dev/null || \
+	echo -dirty)
+
+CH_BUILD_ID := $(CH_GIT_HASH)$(CH_GIT_DIRTY)
+
+ifeq ($(strip $(CH_VERSION)),)
+TARGET ?= $(CH_PROJECT_NAME)
+else
+TARGET ?= $(CH_PROJECT_NAME)-v$(CH_VERSION)-$(CH_BUILD_ID)
+endif
+
+BUILD ?= build
 
 DEBUG ?= 1
 TRACE ?= 0
