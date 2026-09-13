@@ -6,6 +6,7 @@
  * GameCube-specific while application policy stays with the consumer.
  */
 
+#include <unistd.h>
 #include <carryhandle/ch_dvd.h>
 
 #include <gccore.h>
@@ -85,6 +86,10 @@ static bool gc_dvd_image_mount_owned;
 static CH_RemoteDiscSession *gc_dvd_remote_session;
 static uint8_t *gc_dvd_remote_fst;
 static uint32_t gc_dvd_remote_fst_size;
+
+/* CH_DVD_SD_DIRECTORY_BACKING_V1 */
+static bool gc_dvd_sd_directory_mounted;
+
 
 enum {
     CH_DVD_BACKING_PHYSICAL = 0,
@@ -780,6 +785,11 @@ static const devoptab_t gc_dvd_devoptab =
 
 bool CH_DVDMount(void)
 {
+
+    if (gc_dvd_sd_directory_mounted)
+        return false;
+
+
     const gc_fst_entry_t *root;
     uint32_t count;
 
@@ -836,6 +846,11 @@ bool CH_DVDMount(void)
 bool CH_DVDMountRemote(
     CH_RemoteDiscSession *session)
 {
+
+    if (gc_dvd_sd_directory_mounted)
+        return false;
+
+
     uint8_t disc_header[32];
     uint8_t boot_info[16];
 
@@ -977,8 +992,569 @@ bool CH_DVDMountRemote(
 }
 
 
+#define CH_DVD_SD_MOUNT_NAME      "chdvdsd"
+#define CH_DVD_SD_PATH_MAX        512u
+
+
+typedef struct gc_dvd_sd_file
+{
+    int fd;
+} gc_dvd_sd_file_t;
+
+
+static bool gc_dvd_sd_mount_owned;
+static char gc_dvd_sd_directory[CH_DVD_SD_PATH_MAX];
+
+
+static bool CH_DVD_SDHasParentTraversal(
+    const char *path)
+{
+    const char *p;
+
+    if (path == NULL)
+        return true;
+
+    p = path;
+
+    while (*p != '\0')
+    {
+        const char *component;
+        size_t length;
+
+        while (*p == '/')
+            ++p;
+
+        if (*p == '\0')
+            break;
+
+        component = p;
+
+        while (*p != '\0' &&
+               *p != '/')
+        {
+            ++p;
+        }
+
+        length =
+            (size_t)(p - component);
+
+        if (length == 2 &&
+            component[0] == '.' &&
+            component[1] == '.')
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+static int CH_DVD_SDTranslatePath(
+    struct _reent *r,
+    const char *path,
+    char *translated,
+    size_t translated_size)
+{
+    const char *relative;
+    int written;
+
+    if (path == NULL ||
+        translated == NULL ||
+        translated_size == 0)
+    {
+        if (r != NULL)
+            r->_errno = EINVAL;
+
+        errno = EINVAL;
+        return -1;
+    }
+
+    relative = path;
+
+    if (strncmp(
+            relative,
+            "dvd:",
+            4) == 0)
+    {
+        relative += 4;
+    }
+
+    if (CH_DVD_SDHasParentTraversal(relative))
+    {
+        if (r != NULL)
+            r->_errno = EACCES;
+
+        errno = EACCES;
+        return -1;
+    }
+
+    if (*relative == '\0')
+    {
+        relative = "/";
+    }
+
+    written =
+        snprintf(
+            translated,
+            translated_size,
+            "%s%s%s",
+            gc_dvd_sd_directory,
+            *relative == '/' ? "" : "/",
+            relative);
+
+    if (written < 0 ||
+        (size_t)written >= translated_size)
+    {
+        if (r != NULL)
+            r->_errno = ENAMETOOLONG;
+
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static int CH_DVD_SDOpen(
+    struct _reent *r,
+    void *fileStruct,
+    const char *path,
+    int flags,
+    int mode)
+{
+    gc_dvd_sd_file_t *file =
+        (gc_dvd_sd_file_t *)fileStruct;
+
+    char translated[CH_DVD_SD_PATH_MAX];
+    int fd;
+
+    (void)mode;
+
+    if (file == NULL)
+    {
+        if (r != NULL)
+            r->_errno = EINVAL;
+
+        errno = EINVAL;
+        return -1;
+    }
+
+    /*
+     * dvd:/ remains read-only just like the native GameCube disc backend.
+     */
+    if ((flags & O_ACCMODE) != O_RDONLY ||
+        (flags & (O_CREAT |
+                  O_TRUNC |
+                  O_APPEND)) != 0)
+    {
+        if (r != NULL)
+            r->_errno = EROFS;
+
+        errno = EROFS;
+        return -1;
+    }
+
+    if (CH_DVD_SDTranslatePath(
+            r,
+            path,
+            translated,
+            sizeof(translated)) != 0)
+    {
+        return -1;
+    }
+
+    fd = open(
+        translated,
+        O_RDONLY);
+
+    if (fd < 0)
+    {
+        if (r != NULL)
+            r->_errno = errno;
+
+        return -1;
+    }
+
+    file->fd = fd;
+
+    return 0;
+}
+
+
+static int CH_DVD_SDClose(
+    struct _reent *r,
+    void *fileStruct)
+{
+    gc_dvd_sd_file_t *file =
+        (gc_dvd_sd_file_t *)fileStruct;
+
+    int rc;
+
+    if (file == NULL ||
+        file->fd < 0)
+    {
+        if (r != NULL)
+            r->_errno = EBADF;
+
+        errno = EBADF;
+        return -1;
+    }
+
+    rc = close(file->fd);
+
+    if (rc != 0)
+    {
+        if (r != NULL)
+            r->_errno = errno;
+
+        return -1;
+    }
+
+    file->fd = -1;
+
+    return 0;
+}
+
+
+static ssize_t CH_DVD_SDRead(
+    struct _reent *r,
+    void *fileStruct,
+    char *ptr,
+    size_t len)
+{
+    gc_dvd_sd_file_t *file =
+        (gc_dvd_sd_file_t *)fileStruct;
+
+    ssize_t rc;
+
+    if (file == NULL ||
+        file->fd < 0)
+    {
+        if (r != NULL)
+            r->_errno = EBADF;
+
+        errno = EBADF;
+        return -1;
+    }
+
+    rc = read(
+        file->fd,
+        ptr,
+        len);
+
+    if (rc < 0 &&
+        r != NULL)
+    {
+        r->_errno = errno;
+    }
+
+    return rc;
+}
+
+
+static off_t CH_DVD_SDSeek(
+    struct _reent *r,
+    void *fileStruct,
+    off_t pos,
+    int dir)
+{
+    gc_dvd_sd_file_t *file =
+        (gc_dvd_sd_file_t *)fileStruct;
+
+    off_t rc;
+
+    if (file == NULL ||
+        file->fd < 0)
+    {
+        if (r != NULL)
+            r->_errno = EBADF;
+
+        errno = EBADF;
+        return (off_t)-1;
+    }
+
+    rc = lseek(
+        file->fd,
+        pos,
+        dir);
+
+    if (rc == (off_t)-1 &&
+        r != NULL)
+    {
+        r->_errno = errno;
+    }
+
+    return rc;
+}
+
+
+static int CH_DVD_SDFstat(
+    struct _reent *r,
+    void *fileStruct,
+    struct stat *st)
+{
+    gc_dvd_sd_file_t *file =
+        (gc_dvd_sd_file_t *)fileStruct;
+
+    int rc;
+
+    if (file == NULL ||
+        file->fd < 0 ||
+        st == NULL)
+    {
+        if (r != NULL)
+            r->_errno = EINVAL;
+
+        errno = EINVAL;
+        return -1;
+    }
+
+    rc = fstat(
+        file->fd,
+        st);
+
+    if (rc != 0 &&
+        r != NULL)
+    {
+        r->_errno = errno;
+    }
+
+    return rc;
+}
+
+
+static int CH_DVD_SDStat(
+    struct _reent *r,
+    const char *path,
+    struct stat *st)
+{
+    char translated[CH_DVD_SD_PATH_MAX];
+    int rc;
+
+    if (st == NULL)
+    {
+        if (r != NULL)
+            r->_errno = EINVAL;
+
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (CH_DVD_SDTranslatePath(
+            r,
+            path,
+            translated,
+            sizeof(translated)) != 0)
+    {
+        return -1;
+    }
+
+    rc = stat(
+        translated,
+        st);
+
+    if (rc != 0 &&
+        r != NULL)
+    {
+        r->_errno = errno;
+    }
+
+    return rc;
+}
+
+
+static const devoptab_t gc_dvd_sd_devoptab =
+{
+    .name       = "dvd",
+    .structSize = sizeof(gc_dvd_sd_file_t),
+
+    .open_r     = CH_DVD_SDOpen,
+    .close_r    = CH_DVD_SDClose,
+    .read_r     = CH_DVD_SDRead,
+    .seek_r     = CH_DVD_SDSeek,
+
+    .fstat_r    = CH_DVD_SDFstat,
+    .stat_r     = CH_DVD_SDStat,
+};
+
+
+bool CH_DVDMountSDDirectory(
+    CH_DVD_SDDevice device,
+    const char *directory)
+{
+    DISC_INTERFACE *iface = NULL;
+
+    char normalized[CH_DVD_SD_PATH_MAX];
+    char probe[CH_DVD_SD_PATH_MAX];
+
+    size_t directory_length;
+    struct stat info;
+    int written;
+
+    if (gc_dvd_sd_directory_mounted)
+        return true;
+
+    /*
+     * Do not overlay another dvd:/ implementation.
+     */
+    if (gc_fst_mounted)
+        return false;
+
+    if (FindDevice("dvd:") >= 0)
+        return false;
+
+    if (directory == NULL ||
+        directory[0] != '/')
+    {
+        return false;
+    }
+
+    if (strchr(directory, ':') != NULL ||
+        CH_DVD_SDHasParentTraversal(directory))
+    {
+        return false;
+    }
+
+    directory_length =
+        strlen(directory);
+
+    if (directory_length == 0 ||
+        directory_length >= sizeof(normalized))
+    {
+        return false;
+    }
+
+    memcpy(
+        normalized,
+        directory,
+        directory_length + 1);
+
+    /*
+     * Keep one canonical spelling internally.
+     */
+    while (directory_length > 1 &&
+           normalized[directory_length - 1] == '/')
+    {
+        normalized[directory_length - 1] = '\0';
+        --directory_length;
+    }
+
+    switch (device)
+    {
+        case CH_DVD_SD_SLOT_A:
+            iface = get_io_gcsda();
+            break;
+
+        case CH_DVD_SD_SLOT_B:
+            iface = get_io_gcsdb();
+            break;
+
+        case CH_DVD_SD_SP2:
+            iface = get_io_gcsd2();
+            break;
+
+        default:
+            return false;
+    }
+
+    if (iface == NULL)
+        return false;
+
+    /*
+     * Private FAT device. Applications never see this name.
+     */
+    if (FindDevice(CH_DVD_SD_MOUNT_NAME ":") >= 0)
+        return false;
+
+    if (!fatMountSimple(
+            CH_DVD_SD_MOUNT_NAME,
+            iface))
+    {
+        return false;
+    }
+
+    gc_dvd_sd_mount_owned = true;
+
+    written =
+        snprintf(
+            probe,
+            sizeof(probe),
+            "%s:%s",
+            CH_DVD_SD_MOUNT_NAME,
+            normalized);
+
+    if (written < 0 ||
+        (size_t)written >= sizeof(probe))
+    {
+        fatUnmount(
+            CH_DVD_SD_MOUNT_NAME);
+
+        gc_dvd_sd_mount_owned = false;
+
+        return false;
+    }
+
+    /*
+     * Fail closed: the requested development root MUST exist and MUST be
+     * a directory. There is intentionally no fallback to the SD root.
+     */
+    if (stat(
+            probe,
+            &info) != 0 ||
+        !S_ISDIR(info.st_mode))
+    {
+        fatUnmount(
+            CH_DVD_SD_MOUNT_NAME);
+
+        gc_dvd_sd_mount_owned = false;
+
+        return false;
+    }
+
+    memcpy(
+        gc_dvd_sd_directory,
+        probe,
+        (size_t)written + 1);
+
+    if (AddDevice(
+            &gc_dvd_sd_devoptab) < 0)
+    {
+        gc_dvd_sd_directory[0] =
+            '\0';
+
+        fatUnmount(
+            CH_DVD_SD_MOUNT_NAME);
+
+        gc_dvd_sd_mount_owned = false;
+
+        return false;
+    }
+
+    gc_dvd_sd_directory_mounted = true;
+
+    return true;
+}
+
+
+
 void CH_DVDUnmount(void)
 {
+    if (gc_dvd_sd_directory_mounted) {
+        RemoveDevice("dvd:");
+
+        gc_dvd_sd_directory_mounted = false;
+        gc_dvd_sd_directory[0] = '\0';
+
+        if (gc_dvd_sd_mount_owned) {
+            fatUnmount(CH_DVD_SD_MOUNT_NAME);
+            gc_dvd_sd_mount_owned = false;
+        }
+
+        return;
+    }
+
     if (!gc_fst_mounted)
         return;
 

@@ -48,6 +48,54 @@ bool CH_DVDMountRemote(
     CH_RemoteDiscSession *session
 );
 
+/*
+ * Physical SD interfaces available for development dvd:/ backing.
+ *
+ * This mode deliberately exposes one selected directory on the FAT filesystem
+ * as dvd:/. Applications continue using their normal release paths such as:
+ *
+ *     dvd:/launcher/foo.bmp
+ *     dvd:/data/wad/game.wad
+ *
+ * The same staged filesystem tree can therefore be used for both an SD
+ * development run and a native GCM/FST image.
+ */
+typedef enum CH_DVD_SDDevice
+{
+    CH_DVD_SD_SLOT_A = 0,
+    CH_DVD_SD_SLOT_B = 1,
+    CH_DVD_SD_SP2 = 2
+} CH_DVD_SDDevice;
+
+
+/*
+ * Mount one directory on the selected FAT-formatted SD device as dvd:/.
+ *
+ * For example:
+ *
+ *     CH_DVDMountSDDirectory(
+ *         CH_DVD_SD_SLOT_A,
+ *         "/doomcube-files");
+ *
+ * makes:
+ *
+ *     dvd:/launcher/foo.bmp
+ *
+ * resolve to:
+ *
+ *     <SD>:/doomcube-files/launcher/foo.bmp
+ *
+ * The directory must already exist.
+ *
+ * CH_DVDUnmount() releases both the dvd:/ alias and CarryHandle's private
+ * FAT mount.
+ */
+bool CH_DVDMountSDDirectory(
+    CH_DVD_SDDevice device,
+    const char *directory
+);
+
+
 
 /*
  * Remove CarryHandle's dvd:/ filesystem registration and release any
