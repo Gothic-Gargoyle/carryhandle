@@ -1,5 +1,10 @@
 #include <carryhandle/ch_persist.h>
 
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+#include <zlib.h>
+
 #include <carryhandle/ch_tx.h>
 
 
@@ -301,6 +306,515 @@ static uint32_t persistCrc32(
 
     return
         crc ^ 0xffffffffu;
+}
+
+
+
+/* ------------------------------------------------------------------------- */
+/* Streamed persistent-object PUT                                             */
+/* ------------------------------------------------------------------------- */
+
+#define CH_PERSIST_STREAM_INITIAL_CAPACITY (64u * 1024u)
+
+typedef struct PersistStreamDeflate
+{
+    z_stream stream;
+
+    unsigned char *stored;
+
+    size_t stored_capacity;
+    size_t stored_limit;
+
+    size_t raw_expected;
+    size_t raw_written;
+
+    uLong raw_crc;
+
+    CH_PersistResult failure;
+
+} PersistStreamDeflate;
+
+
+static CH_PersistResult persistZlibResult(
+    int z_result)
+{
+    if (z_result == Z_MEM_ERROR)
+    {
+        return
+            CH_PERSIST_RESULT_NO_MEMORY;
+    }
+
+    return
+        CH_PERSIST_RESULT_CODEC;
+}
+
+
+static bool persistStreamGrowStored(
+    PersistStreamDeflate *state)
+{
+    size_t nextCapacity;
+    size_t nextOffset;
+
+    unsigned char *grown;
+
+    if (!state ||
+        state->failure !=
+            CH_PERSIST_RESULT_OK)
+    {
+        return false;
+    }
+
+    if (state->stored_capacity >=
+        state->stored_limit)
+    {
+        state->failure =
+            CH_PERSIST_RESULT_NO_SPACE;
+
+        return false;
+    }
+
+    nextOffset =
+        state->stored
+            ? (size_t)(
+                state->stream.next_out -
+                (Bytef *)state->stored)
+            : 0u;
+
+    if (state->stored_capacity == 0u)
+    {
+        nextCapacity =
+            CH_PERSIST_STREAM_INITIAL_CAPACITY;
+    }
+    else if (state->stored_capacity >
+        SIZE_MAX / 2u)
+    {
+        nextCapacity =
+            state->stored_limit;
+    }
+    else
+    {
+        nextCapacity =
+            state->stored_capacity * 2u;
+    }
+
+    if (nextCapacity >
+        state->stored_limit)
+    {
+        nextCapacity =
+            state->stored_limit;
+    }
+
+    if (nextCapacity <=
+            state->stored_capacity ||
+        nextOffset >
+            nextCapacity)
+    {
+        state->failure =
+            CH_PERSIST_RESULT_NO_SPACE;
+
+        return false;
+    }
+
+    grown =
+        (unsigned char *)realloc(
+            state->stored,
+            nextCapacity
+        );
+
+    if (!grown)
+    {
+        state->failure =
+            CH_PERSIST_RESULT_NO_MEMORY;
+
+        return false;
+    }
+
+    state->stored =
+        grown;
+
+    state->stored_capacity =
+        nextCapacity;
+
+    state->stream.next_out =
+        (Bytef *)state->stored +
+        nextOffset;
+
+    state->stream.avail_out =
+        (uInt)(
+            state->stored_capacity -
+            nextOffset
+        );
+
+    return true;
+}
+
+
+static bool persistStreamDeflateSink(
+    void *context,
+    const void *data,
+    size_t size)
+{
+    PersistStreamDeflate *state =
+        (PersistStreamDeflate *)context;
+
+    const Bytef *bytes =
+        (const Bytef *)data;
+
+    size_t remaining =
+        size;
+
+    if (!state ||
+        !data ||
+        size == 0u ||
+        state->failure !=
+            CH_PERSIST_RESULT_OK)
+    {
+        return false;
+    }
+
+    if (state->raw_written >
+            state->raw_expected ||
+        size >
+            state->raw_expected -
+                state->raw_written)
+    {
+        state->failure =
+            CH_PERSIST_RESULT_SOURCE_FAILED;
+
+        return false;
+    }
+
+    while (remaining > 0u)
+    {
+        uInt amount =
+            remaining > (size_t)UINT_MAX
+                ? UINT_MAX
+                : (uInt)remaining;
+
+        int zResult;
+
+        state->raw_crc =
+            crc32(
+                state->raw_crc,
+                bytes,
+                amount
+            );
+
+        state->raw_written +=
+            (size_t)amount;
+
+        state->stream.next_in =
+            (Bytef *)(void *)bytes;
+
+        state->stream.avail_in =
+            amount;
+
+        while (state->stream.avail_in)
+        {
+            if (state->stream.avail_out == 0u &&
+                !persistStreamGrowStored(
+                    state))
+            {
+                return false;
+            }
+
+            zResult =
+                deflate(
+                    &state->stream,
+                    Z_NO_FLUSH
+                );
+
+            if (zResult !=
+                Z_OK)
+            {
+                state->failure =
+                    persistZlibResult(
+                        zResult
+                    );
+
+                return false;
+            }
+        }
+
+        bytes +=
+            amount;
+
+        remaining -=
+            (size_t)amount;
+    }
+
+    return true;
+}
+
+
+static bool persistStreamFinish(
+    PersistStreamDeflate *state)
+{
+    for (;;)
+    {
+        int zResult;
+
+        if (state->stream.avail_out == 0u &&
+            !persistStreamGrowStored(
+                state))
+        {
+            return false;
+        }
+
+        zResult =
+            deflate(
+                &state->stream,
+                Z_FINISH
+            );
+
+        if (zResult ==
+            Z_STREAM_END)
+        {
+            return true;
+        }
+
+        if (zResult !=
+            Z_OK)
+        {
+            state->failure =
+                persistZlibResult(
+                    zResult
+                );
+
+            return false;
+        }
+    }
+}
+
+
+CH_PersistResult CH_PersistPutStream(
+    const CH_TxSectorBackend *backend,
+    void *sector_buffer,
+    size_t sector_buffer_size,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    size_t raw_size,
+    CH_PersistStreamProducerFn producer,
+    void *producer_context)
+{
+    CH_TxAppendRequest request = {0};
+
+    PersistStreamDeflate state;
+
+    CH_TxResult txResult;
+
+    size_t containerBytes;
+
+    uLong zBound;
+
+    int zResult;
+    bool initialized =
+        false;
+
+    bool producerOk;
+
+    CH_PersistResult result;
+
+    if (!backend ||
+        !sector_buffer ||
+        !producer ||
+        (!scope && scope_size != 0u) ||
+        !key ||
+        key_size == 0u ||
+        raw_size > UINT32_MAX ||
+        backend->sector_size == 0u ||
+        backend->sector_count == 0u ||
+        (size_t)backend->sector_count >
+            SIZE_MAX /
+                (size_t)backend->sector_size)
+    {
+        return
+            CH_PERSIST_RESULT_INVALID_ARGUMENT;
+    }
+
+    containerBytes =
+        (size_t)backend->sector_count *
+        (size_t)backend->sector_size;
+
+    memset(
+        &state,
+        0,
+        sizeof(state)
+    );
+
+    state.raw_expected =
+        raw_size;
+
+    state.raw_crc =
+        crc32(
+            0L,
+            Z_NULL,
+            0
+        );
+
+    state.failure =
+        CH_PERSIST_RESULT_OK;
+
+    zResult =
+        deflateInit2(
+            &state.stream,
+            Z_BEST_SPEED,
+            Z_DEFLATED,
+            MAX_WBITS,
+            6,
+            Z_DEFAULT_STRATEGY
+        );
+
+    if (zResult !=
+        Z_OK)
+    {
+        return
+            persistZlibResult(
+                zResult
+            );
+    }
+
+    initialized =
+        true;
+
+    zBound =
+        deflateBound(
+            &state.stream,
+            (uLong)raw_size
+        );
+
+    state.stored_limit =
+        (size_t)zBound;
+
+    if (state.stored_limit >
+        containerBytes)
+    {
+        state.stored_limit =
+            containerBytes;
+    }
+
+    if (state.stored_limit >
+        (size_t)UINT_MAX)
+    {
+        state.stored_limit =
+            (size_t)UINT_MAX;
+    }
+
+    if (state.stored_limit == 0u ||
+        !persistStreamGrowStored(
+            &state))
+    {
+        result =
+            state.failure !=
+                CH_PERSIST_RESULT_OK
+                ? state.failure
+                : CH_PERSIST_RESULT_NO_SPACE;
+
+        goto done;
+    }
+
+    producerOk =
+        producer(
+            producer_context,
+            persistStreamDeflateSink,
+            &state
+        );
+
+    if (!producerOk)
+    {
+        result =
+            state.failure !=
+                CH_PERSIST_RESULT_OK
+                ? state.failure
+                : CH_PERSIST_RESULT_SOURCE_FAILED;
+
+        goto done;
+    }
+
+    if (state.failure !=
+            CH_PERSIST_RESULT_OK ||
+        state.raw_written !=
+            state.raw_expected)
+    {
+        result =
+            state.failure !=
+                CH_PERSIST_RESULT_OK
+                ? state.failure
+                : CH_PERSIST_RESULT_SOURCE_FAILED;
+
+        goto done;
+    }
+
+    if (!persistStreamFinish(
+            &state))
+    {
+        result =
+            state.failure !=
+                CH_PERSIST_RESULT_OK
+                ? state.failure
+                : CH_PERSIST_RESULT_CODEC;
+
+        goto done;
+    }
+
+    request.operation =
+        CH_TX_OPERATION_PUT;
+
+    request.scope =
+        scope;
+
+    request.scope_size =
+        scope_size;
+
+    request.key =
+        key;
+
+    request.key_size =
+        key_size;
+
+    request.stored_payload =
+        state.stored;
+
+    request.stored_size =
+        (size_t)state.stream.total_out;
+
+    request.raw_size =
+        (uint32_t)raw_size;
+
+    request.raw_crc32 =
+        (uint32_t)state.raw_crc;
+
+    request.codec =
+        CH_TX_CODEC_ZLIB;
+
+    txResult =
+        persistAppendWithCompaction(
+            backend,
+            sector_buffer,
+            sector_buffer_size,
+            &request
+        );
+
+    result =
+        persistResultFromTx(
+            txResult
+        );
+
+done:
+    if (initialized)
+    {
+        (void)deflateEnd(
+            &state.stream
+        );
+    }
+
+    free(
+        state.stored
+    );
+
+    return result;
 }
 
 

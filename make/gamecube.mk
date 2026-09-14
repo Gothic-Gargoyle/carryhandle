@@ -151,6 +151,20 @@ endif
 
 endif
 
+# CH_PERSIST_REQUIRES_ZLIB
+#
+# ch_persist.c implements the generic zlib-wrapped DEFLATE persistence codec.
+# Consumers select the CarryHandle module; the framework owns that module's
+# platform library/header dependency just as ch_dvd.c owns its libfat
+# dependency above.
+ifneq ($(filter ch_persist.c,$(CH_CFILES)),)
+APP_CFLAGS += \
+	-I$(PORTLIBS_PATH)/ppc/include
+APP_LDFLAGS += \
+	-L$(PORTLIBS_PATH)/ppc/lib
+APP_LIBS := -lz $(APP_LIBS)
+endif
+
 # Consumers select modules; CarryHandle owns where its public headers live.
 APP_INCLUDES += \
 	$(CARRY_ROOT)/include
