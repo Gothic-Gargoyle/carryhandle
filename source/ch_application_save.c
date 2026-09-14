@@ -789,6 +789,92 @@ CH_PersistResult CH_ApplicationSavePut(
 }
 
 
+
+CH_PersistResult CH_ApplicationSavePutIfChanged(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *payload,
+    size_t payload_size,
+    void *compare_buffer,
+    size_t compare_buffer_capacity,
+    bool *out_written)
+{
+    CH_PersistResult result;
+    size_t existing_size = 0u;
+
+    if (out_written)
+        *out_written = false;
+
+    if (!compare_buffer ||
+        compare_buffer_capacity < payload_size ||
+        (!payload && payload_size != 0u))
+    {
+        return CH_PERSIST_RESULT_INVALID_ARGUMENT;
+    }
+
+    result =
+        CH_ApplicationSaveGet(
+            session,
+            scope,
+            scope_size,
+            key,
+            key_size,
+            compare_buffer,
+            compare_buffer_capacity,
+            &existing_size
+        );
+
+    if (result == CH_PERSIST_RESULT_OK)
+    {
+        if (existing_size == payload_size &&
+            (payload_size == 0u ||
+             memcmp(
+                 compare_buffer,
+                 payload,
+                 payload_size) == 0))
+        {
+            return CH_PERSIST_RESULT_OK;
+        }
+    }
+    else if (result == CH_PERSIST_RESULT_BUFFER_TOO_SMALL)
+    {
+        /*
+         * compare_buffer_capacity >= payload_size. Therefore an existing
+         * object too large for the compare buffer cannot possibly have the
+         * same size as payload and is definitely changed.
+         */
+        if (existing_size == payload_size)
+            return result;
+    }
+    else if (result != CH_PERSIST_RESULT_NOT_FOUND)
+    {
+        return result;
+    }
+
+    result =
+        CH_ApplicationSavePut(
+            session,
+            scope,
+            scope_size,
+            key,
+            key_size,
+            payload,
+            payload_size
+        );
+
+    if (result == CH_PERSIST_RESULT_OK &&
+        out_written)
+    {
+        *out_written = true;
+    }
+
+    return result;
+}
+
+
 CH_PersistResult CH_ApplicationSaveDelete(
     CH_ApplicationSaveSession *session,
     const void *scope,

@@ -254,6 +254,36 @@ CH_PersistResult CH_ApplicationSavePut(
     size_t payload_size
 );
 
+
+/*
+ * Store payload only when its exact bytes differ from the current persistent
+ * object.
+ *
+ * compare_buffer is caller-owned scratch storage. Its capacity must be at
+ * least payload_size. CarryHandle performs one read-only GET first:
+ *
+ *   existing bytes equal payload -> return OK, *out_written = false
+ *   object missing / bytes differ -> perform one normal transactional PUT
+ *
+ * No heap allocation is performed by this helper.
+ *
+ * out_written may be NULL. When non-NULL it is set true only after a
+ * definitely successful physical/logical PUT.
+ */
+CH_PersistResult CH_ApplicationSavePutIfChanged(
+    CH_ApplicationSaveSession *session,
+    const void *scope,
+    size_t scope_size,
+    const void *key,
+    size_t key_size,
+    const void *payload,
+    size_t payload_size,
+    void *compare_buffer,
+    size_t compare_buffer_capacity,
+    bool *out_written
+);
+
+
 CH_PersistResult CH_ApplicationSaveDelete(
     CH_ApplicationSaveSession *session,
     const void *scope,
