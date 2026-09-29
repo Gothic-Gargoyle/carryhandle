@@ -17,3 +17,6 @@ build/
 # Python host tooling
 __pycache__/
 *.py[cod]
+
+# Local development scratch
+/experiments/git-version-helper/
