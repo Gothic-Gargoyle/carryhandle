@@ -135,6 +135,20 @@ s32 CH_MemCardWrite(
 
 
 /*
+ * Refresh the opened file's native GameCube Memory Card modification time.
+ *
+ * CARD_GetStatus() preserves the existing banner/icon/comment metadata.
+ * CARD_SetStatus() writes those values back and libogc2 itself stamps the
+ * directory entry's native last_modified field with the current CARD time.
+ *
+ * No application payload bytes are changed.
+ */
+s32 CH_MemCardTouch(
+    card_file *file
+);
+
+
+/*
  * Close an opened Memory Card file.
  *
  * Returns CARD_ERROR_READY on success or the underlying CARD_* error.

@@ -1,4 +1,5 @@
 #include <carryhandle/ch_tx_memcard_backend.h>
+#include <carryhandle/ch_tx_format.h>
 
 #include <limits.h>
 #include <string.h>
@@ -74,6 +75,7 @@ static bool memCardWriteSector(
         (CH_TxMemCardBackendContext *)opaque;
 
     uint32_t offset;
+    s32 result;
 
     if (
         !sector_buffer ||
@@ -87,13 +89,34 @@ static bool memCardWriteSector(
         return false;
     }
 
-    return
+    result =
         CH_MemCardWrite(
             context->file,
             sector_buffer,
             context->sector_size,
             offset
-        ) == CARD_ERROR_READY;
+        );
+
+    if (result != CARD_ERROR_READY)
+    {
+        return false;
+    }
+
+    /*
+     * Only publishing one of CHTX's A/B superblocks can make a new
+     * transaction authoritative. Preceding data/record writes therefore
+     * do not change user-visible Memory Card modification metadata.
+     */
+    if (
+        sector_index == CH_TX_SUPERBLOCK_A_SECTOR ||
+        sector_index == CH_TX_SUPERBLOCK_B_SECTOR
+    )
+    {
+        context->timestamp_pending =
+            true;
+    }
+
+    return true;
 }
 
 
@@ -103,16 +126,36 @@ static bool memCardSync(
     CH_TxMemCardBackendContext *context =
         (CH_TxMemCardBackendContext *)opaque;
 
+    if (
+        !context ||
+        !context->session ||
+        !context->file ||
+        !context->session->mounted
+    )
+    {
+        return false;
+    }
+
     /*
-     * CARD_Write() is synchronous. There is no additional CARD flush
-     * operation to perform here; successful write_sector() already
-     * completed the physical write.
+     * CARD_Write() is synchronous, so there is no additional payload flush.
+     *
+     * If this barrier follows a successfully written CHTX superblock, the new
+     * transaction is now authoritative. Refresh the native Memory Card
+     * modification timestamp at that exact framework-wide commit boundary.
+     *
+     * Timestamp metadata is best-effort. A failure here must not turn an
+     * already durable CHTX commit into COMMIT_UNCERTAIN.
      */
-    return
-        context &&
-        context->session &&
-        context->file &&
-        context->session->mounted;
+    if (context->timestamp_pending)
+    {
+        context->timestamp_pending =
+            false;
+
+        (void)CH_MemCardTouch(
+            context->file);
+    }
+
+    return true;
 }
 
 
@@ -187,6 +230,9 @@ bool CH_TxMemCardBackendInit(
 
     context->sector_count =
         sectorCount;
+
+    context->timestamp_pending =
+        false;
 
     backend->context =
         context;

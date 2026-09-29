@@ -27,6 +27,13 @@ typedef struct CH_TxMemCardBackendContext
     uint32_t sector_size;
     uint32_t sector_count;
 
+    /*
+     * True after a CHTX A/B superblock has been physically written.
+     * The immediately following durability barrier refreshes native
+     * GameCube Memory Card modification metadata.
+     */
+    bool timestamp_pending;
+
 } CH_TxMemCardBackendContext;
 
 

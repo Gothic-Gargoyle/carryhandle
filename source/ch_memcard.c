@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <ogc/system.h>
 
 
 bool CH_MemCardMount(
@@ -267,6 +268,43 @@ s32 CH_MemCardWrite(
         len,
         offset
     );
+}
+
+
+
+s32 CH_MemCardTouch(
+    card_file *file)
+{
+    card_stat status;
+    s32 result;
+
+    if (!file)
+    {
+        return
+            CH_MEMCARD_ERROR_INVALID_ARGUMENT;
+    }
+
+    result =
+        CARD_GetStatus(
+            file->chn,
+            file->filenum,
+            &status);
+
+    if (result !=
+        CARD_ERROR_READY)
+    {
+        return result;
+    }
+
+    /*
+     * libogc2's CARD_SetStatus() updates the directory entry's
+     * last_modified field to the current GameCube clock automatically.
+     */
+    return
+        CARD_SetStatus(
+            file->chn,
+            file->filenum,
+            &status);
 }
 
 
