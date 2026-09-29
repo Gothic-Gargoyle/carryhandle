@@ -3,6 +3,32 @@
 CarryHandle is a lightweight C framework for Nintendo GameCube homebrew
 built around devkitPPC and libogc2.
 
+<!-- CARRYHANDLE_QUICK_DEV_BEGIN -->
+## GameCube development quick start
+
+CarryHandle is intended to be used as a Git submodule inside the consuming project.
+
+Common real-hardware development paths:
+
+```sh
+# Consumer-owned target using CarryHandle's normal USB Gecko/Swiss runner.
+make run
+
+# Consumer-specific SD-backed development target, when provided by the project.
+make run-hardware-sd
+
+# Consumer-specific PC-hosted disc-image target, when provided by the project.
+make run-hardware-remote
+```
+
+For SD-backed projects, CarryHandle can expose a directory on the SD card as `dvd:/`.
+The exact SD path and build target are owned by the consuming project.
+
+Application persistence helpers include write-if-changed support so consumers can avoid unnecessary Memory Card writes.
+
+For API details, persistence internals, transport design, and architecture, use the dedicated source/header documentation and project technical docs rather than this README.
+<!-- CARRYHANDLE_QUICK_DEV_END -->
+
 It provides reusable GameCube platform components and build tooling for
 applications that need more than raw hardware APIs, without requiring
 them to adopt a game engine or monolithic framework architecture.
@@ -364,7 +390,6 @@ git add deps/carryhandle
 
 The parent repository then records that exact CarryHandle revision as its
 submodule gitlink.
-
 
 ### Release publication
 
