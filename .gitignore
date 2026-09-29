@@ -17,3 +17,6 @@ build/
 # Python host tooling
 __pycache__/
 *.py[cod]
+ld-sd
+ld-remote
+eriments
