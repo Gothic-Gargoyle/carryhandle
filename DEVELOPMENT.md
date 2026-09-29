@@ -1,22 +1,36 @@
 # CarryHandle Development
 
+This document is for contributors changing CarryHandle itself. Consumer setup
+belongs in [`GETTING_STARTED.md`](GETTING_STARTED.md).
+
 ## Core rule
 
-A feature does not belong in CarryHandle merely because DoomCube uses
-it.
+A feature does not belong in CarryHandle merely because one consumer uses it.
+It belongs when a second unrelated GameCube application could reasonably use
+the same platform mechanism.
 
-A feature belongs in CarryHandle when a second unrelated GameCube
-application could reasonably use it.
+## Ownership test
+
+Before adding code, ask:
+
+1. Is this reusable GameCube platform behavior?
+2. Can the behavior be expressed without consumer-specific policy?
+3. Can it be tested independently?
+4. Does CarryHandle add value beyond renaming a libogc2 call?
+
+If the answer is no, keep it in the consumer.
+
+The architectural ownership boundary is defined in
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Development strategy
 
-CarryHandle is being developed by extracting reusable GameCube platform
-work proven during DoomCube development.
-
-The extraction process is:
+CarryHandle is developed from proven needs in real applications:
 
 ```text
-identify
+consumer need
+    ↓
+identify reusable platform behavior
     ↓
 understand dependencies
     ↓
@@ -24,120 +38,104 @@ classify
     ↓
 remove application policy
     ↓
-define CH_* API
+define/refine CH_* boundary
     ↓
-extract
+implement and prove in CarryHandle
     ↓
-build isolated example
+dogfood in independent consumers
     ↓
-test
+pin the proven CarryHandle revision
 ```
 
-Do not begin by copying the entire DoomCube platform directory.
+Do not begin by copying an entire consumer platform directory.
 
 ## Extraction classifications
 
-Every DoomCube candidate should be classified as one of:
-
 ### EXTRACT
 
-The implementation is already largely generic GameCube functionality.
-
-It may be moved into CarryHandle with naming and interface cleanup.
+Implementation is already largely generic GameCube functionality and can move
+with naming/interface cleanup.
 
 ### ADAPT
 
-The implementation contains reusable GameCube functionality but is
-coupled to DoomCube policy, globals, data structures, or lifecycle.
-
-The generic behavior should be separated before entering CarryHandle.
+Implementation contains reusable platform functionality but is coupled to
+consumer globals, data structures, lifecycle or policy. Separate those first.
 
 ### LEAVE
 
-The functionality is application-specific and does not belong in the
-framework.
+The behavior is application-specific.
 
 Examples include:
 
-- Doom menu behavior
-- IWAD/PWAD identity policy
-- Doom save-slot semantics
-- Doom input bindings
+- game menu behavior
+- game/content identity policy
+- game-specific save-slot semantics
+- game input bindings
 - game-event-to-rumble mappings
-- Doom music conversion policy
+- engine-specific asset/music conversion policy
+- game rules and renderer policy
 
 ## Provenance
 
-Code extracted from DoomCube must retain appropriate provenance and
-licensing information.
-
-Before copying a source file, determine whether it is:
+Before copying source, determine whether it is:
 
 - newly written GameCube platform code
-- modified upstream Doom/DoomGeneric code
+- modified upstream engine/game code
 - adapted third-party code
 - generated code
 
-Do not copy a mixed source file wholesale merely because part of it is
-useful.
-
-Where practical, extract the independently authored reusable logic
-rather than carrying unrelated upstream material into CarryHandle.
-
-## Scope discipline
-
-CarryHandle must resist becoming a dumping ground.
-
-Do not add functionality because it might hypothetically be useful.
-
-Prefer functionality that is:
-
-- already needed by a real GameCube application
-- demonstrably reusable
-- testable independently
-- narrow enough to document clearly
+Preserve appropriate provenance and licensing. Prefer extracting independently
+authored reusable logic over carrying unrelated upstream material into
+CarryHandle.
 
 ## Public API rules
 
-Public API:
+Public declarations live in:
 
 ```text
 include/carryhandle/
 ```
 
-Implementation:
+Implementation lives in:
 
 ```text
 source/
 ```
 
-Public symbols use:
-
-```text
-CH_
-```
-
-Implementation-only helpers should remain private.
-
-Do not expose internal functions in a public header simply to make
-development convenient.
-
-## Module rules
+Public symbols use the `CH_` namespace. Implementation-only helpers remain
+private.
 
 Each substantial module should have:
 
 1. a focused public header
-2. an implementation with minimal external dependencies
+2. implementation with minimal unrelated dependencies
 3. documented lifecycle and ownership
-4. an isolated example or regression test
-5. no application-specific policy
+4. an isolated example or regression proof where practical
+5. no consumer-specific policy
 
-## Building and testing CarryHandle
+## Repository layout
 
-CarryHandle uses the normal devkitPro GameCube toolchain rather than a
-private compiler environment.
+```text
+carryhandle/
+├── include/carryhandle/   public C API
+├── source/                runtime implementation
+├── make/                  reusable Make fragments
+├── tools/                 host-side tooling
+├── examples/              small consumer examples
+├── experiments/           focused development proofs
+├── docs/                  architecture and subsystem documentation
+├── README.md              project front door
+├── GETTING_STARTED.md     consumer setup and workflow
+├── DEVELOPMENT.md         contributor workflow
+└── TECHNICAL.md           technical documentation index
+```
 
-Core development requirements are:
+Experiments are evidence and development scaffolding; they are not automatically
+public API or consumer workflow.
+
+## Build requirements
+
+Core development requirements:
 
 ```text
 devkitPro
@@ -147,13 +145,12 @@ GNU Make
 Python 3
 ```
 
-Optional modules or consumers may add their own dependencies. A low-level
-CarryHandle module should not acquire an unrelated dependency merely because
-one consumer already links it.
+Low-level modules should not acquire an unrelated dependency merely because one
+consumer already links it.
 
-### Building examples
+## Build examples
 
-The repository root provides ordinary Make orchestration:
+Repository-level examples:
 
 ```bash
 make
@@ -161,30 +158,24 @@ make examples
 make hello
 ```
 
-The hello example can also be built directly:
+Direct hello build:
 
 ```bash
 make -C examples/hello
 ```
 
-Generated build products belong below build directories rather than alongside
-source files.
+Generated products belong under build directories, not beside source files.
+Prefer incremental builds; use `make clean` when a clean rebuild is actually
+part of the test.
 
-Normal development should use incremental builds. `make clean` and forced
-rebuilds are diagnostic or destructive operations and should not be routine
-prerequisites.
+## Test progression
 
-### Testing shared changes
-
-Framework changes should be proven at the narrowest useful level first and
-then through real consumers when they affect shared behavior.
-
-A useful progression is:
+Prove changes at the narrowest useful level first:
 
 ```text
 syntax / host-tool validation
         ↓
-isolated example
+isolated example or focused proof
         ↓
 consumer compile
         ↓
@@ -195,128 +186,67 @@ Dolphin runtime proof
 real GameCube hardware where relevant
 ```
 
-Changes to shared Make fragments, native GCM tooling, manifests, input,
-video, DVD/FST, Memory Card, persistence, or other cross-application services
-should be exercised by more than one unrelated consumer whenever practical.
+Shared Make rules, native image tooling, manifests, input, video, DVD/FST,
+Memory Card and persistence changes should be exercised by more than one
+unrelated consumer whenever practical.
 
-DoomCube and Quake2Cube are current dogfood consumers. Passing in one does not
-by itself establish that a supposedly generic change is application
-independent.
+Passing in one consumer does not prove that a supposedly generic change is
+application-independent.
 
-Real-hardware-sensitive behavior such as DVD alignment, cache management,
-video presentation, controller operation, rumble, and Memory Card access
-requires hardware validation when a change can affect it.
+Hardware-sensitive behavior such as DVD alignment, cache management, video,
+controller operation, rumble and Memory Card access requires hardware
+validation when the change can affect it.
 
-CarryHandle's Swiss-launched image-backed DVD path and native disc
-presentation generation have been validated through DoomCube on a real
-Nintendo GameCube using:
+## Developing against a local checkout
 
-```text
-PicoLoader -> Swiss -> SD Gecko -> DoomCube .iso
-```
-
-That proof covers the Swiss-launched `.iso` path from SD, including image-backed
-game-data reads and generated disc presentation. It does not by itself establish
-support for burned optical discs, other ODEs/loaders, other Swiss storage
-devices, direct-DOL launch behavior, or real-hardware Memory Card writes.
-
-### Developing against a local CarryHandle checkout
-
-A consumer normally uses its pinned `deps/carryhandle` submodule.
-
-During CarryHandle development, point the consumer explicitly at the working
-CarryHandle checkout rather than rewriting or dirtying the submodule. The
-canonical shared variable is:
+Consumers normally use their pinned `deps/carryhandle` submodule. During
+CarryHandle development, point the consumer explicitly at the working checkout:
 
 ```bash
 make CARRY_ROOT=/path/to/carryhandle test
 ```
 
-A consumer may expose a project-specific wrapper variable which ultimately
-sets `CARRY_ROOT`.
+Do not dirty or silently replace the consumer's pinned dependency merely to
+perform framework development.
 
-## Examples
+## Examples and regression oracles
 
-Examples are part of the framework design process.
+Examples are part of API design. If an API cannot be demonstrated cleanly in a
+small example, that is evidence the boundary may be too complicated.
 
-An API that cannot be demonstrated cleanly in a tiny example is a sign
-that the API may be too complicated.
-
-Planned examples include:
-
-```text
-hello
-input
-rumble
-dvd
-card
-storage
-```
-
-Examples should demonstrate CarryHandle rather than reimplementing large
-applications.
-
-## Consumer ports as regression oracles
-
-CarryHandle is developed against real applications rather than speculative
-framework use cases.
-
-DoomCube and Quake2Cube are current regression oracles for behavior that has
-already been proven in application development.
-
-Consumer ports can answer questions such as:
+Real consumers are regression oracles for already-proven behavior. They help
+answer:
 
 - what hardware behavior is actually required?
-- which alignment or cache constraints matter?
+- which alignment/cache constraints matter?
 - which lifecycle survives real application usage?
-- which failure cases have already been encountered?
-- whether an API is genuinely reusable across unrelated engines
+- which failure cases have already appeared?
+- is the API reusable across unrelated engines?
 
-CarryHandle should not remain source-coupled to any consumer after reusable
-behavior has been extracted.
+CarryHandle must not remain source-coupled to a consumer after the reusable
+mechanism has been extracted.
 
-Application policy remains in the application repository. CarryHandle owns
-only the reusable GameCube platform mechanism.
+## Scope discipline
+
+CarryHandle must resist becoming a dumping ground. Prefer functionality that
+is already needed, demonstrably reusable, independently testable and narrow
+enough to document clearly.
+
+## Documentation rule
+
+Documentation follows the same modularity rule as code:
+
+- `README.md`: short project front door
+- `GETTING_STARTED.md`: consumer setup and operational path
+- `DEVELOPMENT.md`: work on CarryHandle itself
+- `TECHNICAL.md`: index, not an encyclopedia
+- `docs/architecture.md`: ownership and design rationale
+- `docs/<subsystem>.md`: subsystem-specific details
+
+When one document accumulates several independent subsystems or becomes hard to
+navigate, split it rather than growing another wall of text.
 
 ## Commits
 
-Prefer small commits corresponding to coherent milestones.
-
-Examples:
-
-```text
-Bootstrap CarryHandle architecture
-Add GameCube hello example
-Add controller input module
-Add rumble sequencer
-Add native DVD access
-```
-
-Avoid giant commits that simultaneously extract multiple subsystems.
-
-## Current development direction
-
-CarryHandle has moved beyond its bootstrap/extraction-only phase and is now
-consumed by multiple independent GameCube ports.
-
-New framework work should therefore be driven by demonstrated reusable needs
-across consumers rather than by the historical bootstrap milestone order.
-
-The preferred cycle is:
-
-```text
-consumer need
-    ↓
-identify reusable platform behavior
-    ↓
-define or refine the CH_* boundary
-    ↓
-prove the CarryHandle implementation
-    ↓
-dogfood it in independent consumers
-    ↓
-pin the proven CarryHandle revision
-```
-
-Application-specific renderer policy, game rules, asset policy, save
-serialization, and release semantics remain in the application repositories.
+Prefer small commits corresponding to coherent milestones. Avoid commits that
+simultaneously introduce unrelated subsystems.
